@@ -42,12 +42,14 @@ export interface PaceStripProps {
   timeZone?: string;
   className?: string;
   loading?: boolean;
+  /** `lg` for showcase use (the landing hero); `md` everywhere in the app. */
+  size?: 'md' | 'lg';
 }
 
-const LANE_H = 28;
-const TRACK_TOP = 6;
-const TRACK_H = 12;
-const USAGE_TOP = 22;
+const SIZES = {
+  md: { LANE_H: 28, TRACK_TOP: 6, TRACK_H: 12, USAGE_TOP: 22, label: 'text-label' },
+  lg: { LANE_H: 40, TRACK_TOP: 8, TRACK_H: 18, USAGE_TOP: 32, label: 'text-body' },
+} as const;
 const TOP_PAD = 18; // room for the "Now" caption
 const AXIS_H = 22;
 const COL = 2; // density column width in px
@@ -87,7 +89,9 @@ export function PaceStrip({
   timeZone,
   className,
   loading,
+  size = 'md',
 }: PaceStripProps) {
+  const { LANE_H, TRACK_TOP, TRACK_H, USAGE_TOP, label: labelSize } = SIZES[size];
   const [plotRef, width] = useWidth<HTMLDivElement>();
   const [expanded, setExpanded] = useState(false);
   const [active, setActive] = useState<{ lane: number; w: number } | null>(null);
@@ -218,7 +222,7 @@ export function PaceStrip({
           {visibleLanes.map((l) => (
             <div
               key={l.id}
-              className="truncate pr-2 text-label text-ink-2"
+              className={cn('truncate pr-2 text-ink-2', labelSize)}
               style={{ height: LANE_H, lineHeight: `${TRACK_TOP * 2 + TRACK_H}px` }}
             >
               {l.label}

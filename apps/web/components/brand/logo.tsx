@@ -12,11 +12,16 @@ export function Mark({ className, mono = false }: { className?: string; mono?: b
   );
 }
 
-export function Logo({ className }: { className?: string }) {
+export function Logo({ className, size = 'md' }: { className?: string; size?: 'md' | 'lg' }) {
   return (
     <span className={cn('inline-flex items-center gap-2', className)}>
-      <Mark />
-      <span className="text-[17px] leading-none font-semibold tracking-[-0.01em] text-ink">
+      <Mark className={size === 'lg' ? 'size-6' : undefined} />
+      <span
+        className={cn(
+          'leading-none font-semibold tracking-[-0.01em] text-ink',
+          size === 'lg' ? 'text-[21px]' : 'text-[17px]',
+        )}
+      >
         cadence
       </span>
     </span>
