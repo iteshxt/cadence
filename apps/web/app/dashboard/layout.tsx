@@ -10,11 +10,12 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   if (!user) redirect('/login?next=/dashboard');
 
   return (
-    <div className="min-h-dvh bg-canvas">
+    <div className="min-h-dvh overflow-x-clip bg-canvas">
       <Suspense>
         <AppHeader user={{ name: user.name, email: user.email, avatarUrl: user.avatarUrl }} />
       </Suspense>
-      <main className="mx-auto max-w-[1200px] px-6 pt-8 pb-16 max-md:px-4 max-md:pt-6">
+      {/* Clears the fixed header: 72 px bar, plus the nav row on phones. */}
+      <main className="mx-auto max-w-[1200px] px-6 pt-[112px] pb-20 max-md:px-4 max-md:pt-[136px]">
         {children}
       </main>
       <Suspense>
