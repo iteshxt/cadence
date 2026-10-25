@@ -68,16 +68,6 @@ const PROOF_FILL: Partial<Record<EmailStatus, string>> = {
   sending: 'bg-signal-soft',
 };
 
-/**
- * Sections meet with a short vertical blend from the previous section's color instead of a hard
- * edge (design.md §8.1). The solid color below the blend is the section's own.
- */
-type Tone = 'canvas' | 'surface' | 'signal';
-const blend = (from: Tone, to: Tone, px = 160): CSSProperties => ({
-  backgroundColor: `var(--${to})`,
-  backgroundImage: `linear-gradient(to bottom, var(--${from}) 0, var(--${to}) ${px}px)`,
-});
-
 /** Staggered entrance for the hero: the page's single load-time sequence (design.md §9). */
 const rise = (ms: number): CSSProperties => ({ animationDelay: `${ms}ms` });
 
@@ -113,22 +103,18 @@ function Section({
   intro,
   children,
   tone = 'surface',
-  from,
 }: {
   id: string;
   title: string;
   intro: string;
   children: ReactNode;
   tone?: 'surface' | 'canvas';
-  /** The color of the section above, blended into this one. */
-  from: Tone;
 }) {
   return (
     <section
       id={id}
       aria-labelledby={`${id}-title`}
-      style={blend(from, tone)}
-      className="flex min-h-svh items-center"
+      className={`flex min-h-svh items-center border-t border-line ${tone === 'canvas' ? 'bg-canvas' : 'bg-surface'}`}
     >
       <div className="mx-auto w-full max-w-[1280px] px-8 py-24 max-md:px-4 max-md:py-16">
         <Reveal>
@@ -189,17 +175,15 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <div style={rise(600)} className="motion-safe:animate-rise">
+          <div style={rise(600)} className="border-t border-line motion-safe:animate-rise">
             <dl className="mx-auto grid max-w-[1280px] grid-cols-2 px-8 max-md:px-4 lg:grid-cols-4">
               {guarantees.map((g, i) => (
                 <div
                   key={g.label}
                   className={cn(
                     'py-7 pr-6 max-lg:py-5',
-                    // Soft dividers that fade out at both ends instead of hard rules.
-                    'relative before:absolute before:inset-y-3 before:left-0 before:w-px before:bg-linear-to-b before:from-transparent before:via-line before:to-transparent',
-                    i === 0 ? 'before:hidden' : 'lg:pl-8',
-                    i % 2 === 1 ? 'max-lg:pl-6' : 'max-lg:before:hidden',
+                    i > 0 && 'lg:border-l lg:border-line lg:pl-8',
+                    i % 2 === 1 && 'max-lg:border-l max-lg:border-line max-lg:pl-6',
                   )}
                 >
                   <dt className="sr-only">{g.label}</dt>
@@ -215,7 +199,6 @@ export default function LandingPage() {
 
         <Section
           id="how"
-          from="canvas"
           title="How a campaign runs"
           intro="Three steps, with a preview before you schedule anything."
         >
@@ -246,7 +229,6 @@ export default function LandingPage() {
 
         <Section
           id="reliability"
-          from="surface"
           tone="canvas"
           title="What happens when…"
           intro="The failure cases are the product. Each one below is covered by an automated test."
@@ -280,8 +262,7 @@ export default function LandingPage() {
         <div className="flex min-h-svh flex-col">
           <section
             aria-labelledby="start-title"
-            style={blend('canvas', 'signal', 200)}
-            className="flex flex-1 items-center text-signal-fg"
+            className="flex flex-1 items-center bg-signal text-signal-fg"
           >
             <div className="mx-auto flex w-full max-w-[1280px] flex-col items-center px-8 py-24 text-center max-md:px-4 max-md:py-16">
               <TicksMark onAccent />
@@ -301,8 +282,8 @@ export default function LandingPage() {
             </div>
           </section>
 
-          <footer style={blend('signal', 'canvas', 96)}>
-            <div className="mx-auto grid max-w-[1280px] gap-8 px-8 pt-28 pb-12 max-md:px-4 md:grid-cols-[minmax(0,1fr)_auto]">
+          <footer className="bg-canvas">
+            <div className="mx-auto grid max-w-[1280px] gap-8 px-8 py-12 max-md:px-4 md:grid-cols-[minmax(0,1fr)_auto]">
               <div className="flex flex-col gap-3">
                 <Logo size="lg" />
                 <p className="max-w-[48ch] text-body text-ink-3">
