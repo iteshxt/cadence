@@ -1,0 +1,260 @@
+@import 'tailwindcss';
+
+/* Design tokens: docs/design.md §3–5 and §12. */
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme inline {
+  --font-sans: var(--font-instrument-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-control: var(--control);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-signal: var(--signal);
+  --color-signal-hover: var(--signal-hover);
+  --color-signal-fg: var(--signal-fg);
+  --color-signal-soft: var(--signal-soft);
+  --color-deferred: var(--deferred);
+  --color-deferred-mark: var(--deferred-mark);
+  --color-deferred-soft: var(--deferred-soft);
+  --color-failed: var(--failed);
+  --color-failed-soft: var(--failed-soft);
+}
+
+@theme {
+  --radius-control: 6px;
+  --radius-panel: 10px;
+  --shadow-float: 0 8px 24px -6px rgb(15 18 17 / 0.16), 0 0 0 1px var(--line);
+
+  /* Type scale (design.md §4). */
+  --text-display: 3rem;
+  --text-display--line-height: 3.25rem;
+  --text-display--letter-spacing: -0.02em;
+  --text-display--font-weight: 600;
+  --text-title: 1.5rem;
+  --text-title--line-height: 1.875rem;
+  --text-title--letter-spacing: -0.01em;
+  --text-title--font-weight: 600;
+  --text-section: 1.0625rem;
+  --text-section--line-height: 1.5rem;
+  --text-section--font-weight: 600;
+  --text-body-lg: 1rem;
+  --text-body-lg--line-height: 1.625rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.25rem;
+  --text-label: 0.8125rem;
+  --text-label--line-height: 1.125rem;
+  --text-label--font-weight: 500;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1rem;
+  --text-readout: 2rem;
+  --text-readout--line-height: 2.25rem;
+  --text-readout--letter-spacing: -0.01em;
+  --text-readout--font-weight: 600;
+
+  --animate-flash: flash 1.2s ease-out;
+  --animate-pulse-slow: pulse-slow 2s ease-in-out infinite;
+  --animate-panel-in: panel-in 200ms ease-out;
+  --animate-panel-out: panel-out 150ms ease-in;
+  --animate-pop-in: pop-in 150ms ease-out;
+  --animate-fade-in: fade-in 200ms ease-out;
+  --animate-fade-out: fade-out 150ms ease-in;
+
+  @keyframes flash {
+    from {
+      background-color: var(--signal-soft);
+    }
+    to {
+      background-color: transparent;
+    }
+  }
+  @keyframes pulse-slow {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+  @keyframes panel-in {
+    from {
+      transform: translateX(24px);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+  @keyframes panel-out {
+    from {
+      transform: translateX(0);
+      opacity: 1;
+    }
+    to {
+      transform: translateX(24px);
+      opacity: 0;
+    }
+  }
+  @keyframes pop-in {
+    from {
+      transform: translateY(4px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes fade-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+}
+
+:root {
+  --canvas: #f3f4f2;
+  --surface: #ffffff;
+  --sunken: #ebedea;
+  --line: #dce0dc;
+  --control: #858e89;
+  --ink: #141817;
+  --ink-2: #48514e;
+  --ink-3: #66706c;
+  --signal: #0b6e69;
+  --signal-hover: #085854;
+  --signal-fg: #ffffff;
+  --signal-soft: #e3f1ef;
+  --deferred: #8a5300;
+  --deferred-mark: #c77a00;
+  --deferred-soft: #fbf1e1;
+  --failed: #b42318;
+  --failed-soft: #fcebe9;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --canvas: #0f1211;
+    --surface: #151918;
+    --sunken: #1b201e;
+    --line: #262c2a;
+    --control: #66706b;
+    --ink: #ecefed;
+    --ink-2: #a9b2ae;
+    --ink-3: #87918d;
+    --signal: #4cc2b8;
+    --signal-hover: #6fd3ca;
+    --signal-fg: #06201e;
+    --signal-soft: #12302d;
+    --deferred: #e8a33d;
+    --deferred-mark: #e8a33d;
+    --deferred-soft: #2a1f0c;
+    --failed: #f07167;
+    --failed-soft: #2e1412;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --canvas: #0f1211;
+  --surface: #151918;
+  --sunken: #1b201e;
+  --line: #262c2a;
+  --control: #66706b;
+  --ink: #ecefed;
+  --ink-2: #a9b2ae;
+  --ink-3: #87918d;
+  --signal: #4cc2b8;
+  --signal-hover: #6fd3ca;
+  --signal-fg: #06201e;
+  --signal-soft: #12302d;
+  --deferred: #e8a33d;
+  --deferred-mark: #e8a33d;
+  --deferred-soft: #2a1f0c;
+  --failed: #f07167;
+  --failed-soft: #2e1412;
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: var(--signal-soft);
+    color: var(--ink);
+  }
+  /* One focus treatment everywhere (design.md §7): 2 px signal ring, 2 px canvas offset. */
+  :focus-visible {
+    outline: 2px solid var(--signal);
+    outline-offset: 2px;
+  }
+  mark {
+    background: var(--signal-soft);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Timetable voice: narrow width, tabular figures (design.md §4). */
+@utility time {
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  font-weight: 500;
+  font-stretch: 85%;
+  font-variant-numeric: tabular-nums;
+}
+
+@utility readout {
+  font-size: var(--text-readout);
+  line-height: var(--text-readout--line-height);
+  letter-spacing: var(--text-readout--letter-spacing);
+  font-weight: 600;
+  font-stretch: 85%;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
