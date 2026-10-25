@@ -121,7 +121,7 @@ Statuses are shown as a small glyph plus a text label, with **no pill background
 - **lucide-react** at a 1.5 px stroke, 16 px inline and 20 px in buttons. Icons inherit `currentColor` and are never multicolored.
 - Status glyphs (§3.3) and the brand mark are custom SVGs, not lucide.
 - The only multicolor marks allowed are third-party logos the user must recognize: the Google "G" on the sign-in button and the Slack logo in Settings.
-- An external-link icon appears only on links that open a new tab (Ethereal preview, Queue dashboard). Text never ends in arrow characters.
+- An external-link icon appears only on links that open a new tab (View in Gmail). Text never ends in arrow characters.
 
 ## 7. Components
 
@@ -176,7 +176,7 @@ A label over a value, with no box around it. Used in a row under the pace strip 
 - **Container:** a 10 px panel with a hairline border. Sticky header row: 36 px, `--sunken`, `label` in `--ink-2`.
 - **Body rows:** 48 px, hairline dividers, `--sunken` on hover.
 - **Columns (Scheduled view):** Time (`time` style, left-aligned, 120 px), Recipient (sans, truncated, full value in a tooltip), Subject (`--ink-2`, truncated), Sender (`--ink-2`, 104 px), Status (status mark, 148 px).
-- **Columns (Sent view):** Time (finished time), Recipient, Subject, Sender, Status, and a "View in Ethereal" link with an external-link icon. A failed row shows its reason as a `caption` in `--failed` under the subject.
+- **Columns (Sent view):** Time (finished time), Recipient, Subject, Sender, Status, and a "View in Gmail" link with an external-link icon (opens the message in the sender's Gmail; dry-run sends have none). A failed row shows its reason as a `caption` in `--failed` under the subject.
 - **Hour groups:** rows are grouped by UTC hour window. Each group starts with a 36 px `--sunken` row: on the left, "3 PM to 4 PM" in `label` weight 600; on the right, each sender's usage for that window in `caption` tabular figures ("Sender A 142/200"), shown in `--deferred` when the sender is at its cap. When a page starts mid-group, the group row repeats with "(continued)".
 - **Deferred rows:** time column shows the new time, with "was 3:52 PM" as a caption below it.
 - **Relative time** ("in 12 min", "2 h ago") appears in the time tooltip, not inline.
@@ -216,7 +216,7 @@ Replaces the earlier 640 px modal. Opened by the Compose button or `?compose=1`.
 | **Number field** | Input with a suffix unit in `--ink-3` ("seconds", "emails per hour"). Arrow keys step the value. The pacing fields share one helper caption that states the result ("1 email every 36 seconds"). When the plan exceeds what the senders can send, a second caption in `--deferred`: "Your senders can send 600 emails an hour in total. The rest will move to the next hour." |
 | **Date and time** | Native date and time inputs (the browser's own picker, which is accessible and familiar on every platform), with the timezone as a caption ("Asia/Kolkata, UTC+05:30"). Disabled while **Send now** is on. |
 | **Dropzone** | 120 px, dashed 1 px `--control` border, 10 px radius, upload icon, "Drop a CSV or TXT file, or browse", caption "Up to 2 MB and 5,000 recipients". Drag-over: `--signal` border, `--signal-soft` fill. Once parsed: a file chip (icon, name, size, remove button) and a result line: "1,240 emails ready" in `--ink` weight 600, then "Removed 12 duplicates and 3 invalid addresses" in `--ink-3`. Results are announced with `aria-live="polite"`. |
-| **Sender chips** | 32 px toggles in `label`, 6 px radius, 1 px `--control` border. Selected: `--signal-soft` fill, `--signal` text, check icon. Each chip's from-address is its tooltip. A caption below says what they are: "Shared Ethereal test mailboxes, each limited to 200 emails an hour. Mail is captured for preview and never delivered." |
+| **Sender chips** | 32 px toggles in `label`, 6 px radius, 1 px `--control` border. Selected: `--signal-soft` fill, `--signal` text, check icon. Chips show the user's connected Gmail senders by label; each chip's address is its tooltip. A caption below: "Your connected Gmail accounts. Each sends up to its own hourly limit, set in Settings." With no connected sender, the chips are replaced by "Connect a Gmail account in Settings to send from it." with a Settings link. |
 | **Switch** | 20 × 36 px track, `--control` off, `--signal` on. |
 | **Segmented control** | Used for the strip range and search status filter. 32 px, `--sunken` track, selected segment `--surface` with a hairline. |
 
@@ -235,7 +235,7 @@ Replaces the earlier 640 px modal. Opened by the Compose button or `?compose=1`.
 
 | Component | Spec |
 |---|---|
-| **Avatar menu** | 28 px avatar; initials on `--signal-soft` as the fallback. Menu (`--shadow-float`, 10 px radius): name (`label` weight 600) and email (`caption`), divider, Settings, Queue dashboard (external-link icon), divider, Log out. |
+| **Avatar menu** | 28 px avatar; initials on `--signal-soft` as the fallback. Menu (`--shadow-float`, 10 px radius): name (`label` weight 600) and email (`caption`), divider, Settings, divider, Log out. Bull Board is an operator tool and is never linked from the product. |
 | **Slack section** | Disconnected: Slack logo, "Get a Slack message when a sender reaches its hourly limit.", **Connect Slack** (primary; it is the only primary on Settings). Connected: a filled `--ink` dot, "Connected to **#outreach-alerts** in **Acme**", **Send test message** (secondary) and **Disconnect** (ghost with `--failed` text, confirms first). |
 
 ## 8. Page layouts
@@ -252,7 +252,7 @@ Left-aligned throughout, no centered stack. The page alternates `--canvas` and `
 │                                   │ 20 of 27 sent   ▓▓▓▓▓▓▓▓░░  next at 2:53 PM     │ │
 │  Schedule a campaign, …           │ 2:53 PM  jay@dunder.io   Sender A  ◐ Sending    │ │
 │  [Continue with Google] [GitHub]  └─────────────────────────────────────────────────┘ │
-│  Free demo. Mail goes to Ethereal…                                                   │
+│  Free. Sends from your own Gmail, at the pace you set.                                │
 ├ How a campaign runs (--surface) ─────────────────────────────────────────────────────┤
 │  [upload UI piece]       [pacing fields piece]     [timetable rows piece]            │
 │  1 Upload recipients     2 Set the pace            3 Watch it send                   │
@@ -281,7 +281,7 @@ Left-aligned throughout, no centered stack. The page alternates `--canvas` and `
 Minimal and calm: one task on the page.
 
 - **Top bar** (80 px, no background): the large lockup on the left, linking home, and a ghost **Back to home** button with a left arrow on the right.
-- **Panel:** centered, 440 px wide, 40 px padding (28 px on phones), 10 px radius, hairline border, `--shadow-float`, floating on the same soft teal glow as the landing hero. Inside: "Sign in to Cadence" (30/36, 600), one line of body in `--ink-2` ("Schedule campaigns and watch them send at your pace."), an error banner when the OAuth `error` parameter is present, a full-width 48 px Google button, and a `--sunken` note with a `--signal` shield icon: "This is a demo. Mail goes to Ethereal, a test inbox, and is never delivered to real people."
+- **Panel:** centered, 440 px wide, 40 px padding (28 px on phones), 10 px radius, hairline border, `--shadow-float`, floating on the same soft teal glow as the landing hero. Inside: "Sign in to Cadence" (30/36, 600), one line of body in `--ink-2` ("Schedule campaigns and watch them send at your pace."), an error banner when the OAuth `error` parameter is present, a full-width 48 px Google button, and a `--sunken` note with a `--signal` shield icon: "Cadence only sends from Gmail accounts you connect in Settings. You can disconnect them at any time."
 - **Below the panel:** one centered caption about data use ("We only use your Google name, email, and photo to sign you in."), followed by a **Privacy policy** link.
 - **Footer:** "Cadence" on the left and a GitHub link on the right, in `label`/`--ink-3`.
 - **Motion:** the panel rises in on load (the landing `rise` animation); the caption follows 150 ms later. Static under reduced motion.
@@ -329,10 +329,16 @@ A static, plain-language policy (Google requires its URL to publish the OAuth ap
 
 A single column, max width 720 px. Sections are separated by `section` headings and hairlines, not boxed cards:
 
-1. **Slack** (§7.8).
-2. **Senders:** one row per sender: label, from-address (sans), and a usage meter.
-3. **Sending limits:** a read-only definition list (minimum gap, hourly cap per sender, worker concurrency) from `GET /api/config`, with a caption: "These are set on the server."
-4. **Queue dashboard:** a link with an external-link icon to Bull Board.
+1. **Senders:** the user's Gmail accounts. The section title has a secondary **Connect Gmail** button on its right (Compose stays the page's one primary). One row per sender:
+   - **Left:** the label (`label` weight 600), with the address under it in `caption`/`--ink-2`, and "Sends as <display name>" when a display name is set.
+   - **Right:** the hourly limit ("20 an hour") over a usage meter ("3 of 20 this hour"), then an **Edit** ghost button.
+   - **Edit** expands the row in place: Label, Display name, and Hourly limit (number field, "emails per hour", helper "Up to 200, the server maximum"), with Save (secondary) and Cancel (ghost), plus a ghost-danger **Disconnect** on the left. Disconnect asks inline: "Disconnect this sender? Its scheduled emails will fail instead of sending."
+   - A sender Google stopped accepting shows a `--deferred` **Reconnect needed** mark under the address and a **Reconnect** secondary button.
+   - Empty: "No Gmail accounts connected. Connect one to send campaigns from it." with the Connect Gmail button.
+   - After the OAuth redirect, a toast: "Gmail connected.", "Gmail wasn't connected.", "Cadence needs permission to send email. Connect again and leave the Gmail box ticked.", or "Couldn't connect Gmail. Try again."
+2. **Campaign defaults:** Delay between emails and Hourly limit (the Compose number fields) and a secondary **Save defaults** button, with the caption "Compose starts with these values."
+3. **Slack** (§7.8).
+4. **Server limits:** a read-only definition list (minimum gap, maximum hourly limit per sender, emails sent in parallel, recipients per campaign) from `GET /api/config`, with the caption "These are set on the server."
 
 ## 9. Motion
 
@@ -380,7 +386,8 @@ Motion on the landing page always shows the product doing its job (sending, paci
   - Error: "Couldn't schedule: the start time is more than 5 minutes in the past."
   - Capacity warning: "Your senders can send 600 emails an hour in total. The rest will move to the next hour."
   - Success toast: "1,240 emails scheduled. First send at 3:40 PM."
-  - Slack: "⚠️ Sender A reached its hourly limit (200 of 200). About 37 emails moved to 4:00 PM UTC."
+  - Slack: "⚠️ Sales Gmail reached its hourly limit (20 of 20). About 37 emails moved to 4:00 PM UTC."
+  - No sender: "Connect a Gmail account in Settings before scheduling."
 
 ## 12. Tailwind v4 token sketch
 

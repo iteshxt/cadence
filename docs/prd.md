@@ -36,7 +36,7 @@ Cadence solves this with two pieces:
 
 ## 3. Non-goals
 
-- Real email delivery. All mail goes through **Ethereal** (fake SMTP).
+- Bulk sending infrastructure of our own (SMTP relays, IP warm-up, deliverability tooling). Mail goes out through each user's own Gmail account, within Gmail's limits.
 - Email templating, open and click tracking, reply detection, and lead enrichment.
 - Multi-tenant organizations, teams, or roles. One user is one tenant.
 - Billing.
@@ -58,7 +58,7 @@ These are non-negotiable and any design that violates them is wrong.
 | C1 | Backend in **TypeScript + Express.js** |
 | C2 | Queue is **BullMQ on Redis** |
 | C3 | Database is **PostgreSQL** (we use **Supabase** Postgres). **MongoDB is not allowed.** |
-| C4 | Email is sent through **Ethereal SMTP** |
+| C4 | Email is sent through each user's **own connected Gmail account** (Gmail API, OAuth scope `gmail.send`). Cadence never sends from an address the user hasn't connected. |
 | C5 | **No cron**: no crontab, no `node-cron`, no `agenda`, no repeatable jobs used as a cron substitute |
 | C6 | Persistent across restarts, with no lost or duplicated emails |
 | C7 | Idempotent: the same email is never sent more than once |
@@ -93,9 +93,9 @@ A **campaign** is one compose action. It contains one subject, one body, many re
 | CMP-2 | Fields: **Subject** (required, at most 200 characters) and **Body** (required, plain text, at most 10,000 characters). | P0 |
 | CMP-3 | The user can **upload a CSV or TXT file** of leads. The file is parsed client-side. The form shows the **count of valid emails detected**, plus counts of duplicates and invalid entries removed. | P0 |
 | CMP-4 | **Start time**: date and time in the user's local timezone. It must be now or in the future. The server accepts up to 5 minutes in the past and treats it as "now", so "Send now" and slow requests never fail. "Send now" is a shortcut. | P0 |
-| CMP-5 | **Delay between emails** in seconds (minimum 1, default 2): the minimum spacing between two emails of this campaign, across all its senders. | P0 |
-| CMP-6 | **Hourly limit**: the maximum number of emails per hour for the whole campaign (default 100, range 1–3,600). Delay and hourly limit combine into one spacing, `max(delay, 3600 / hourlyLimit)` seconds, which is shown as "1 email every 36 s". If the plan exceeds what the selected senders may send per hour, the form warns that the extra emails will be deferred. | P0 |
-| CMP-7 | **Send from**: choose one or more sender accounts. Recipients are distributed round-robin across the chosen senders. The default is all senders. | P1 |
+| CMP-5 | **Delay between emails** in seconds (minimum 1, default 2, or the user's saved default): the minimum spacing between two emails of this campaign, across all its senders. | P0 |
+| CMP-6 | **Hourly limit**: the maximum number of emails per hour for the whole campaign (default 100 or the user's saved default, range 1–3,600). Delay and hourly limit combine into one spacing, `max(delay, 3600 / hourlyLimit)` seconds, which is shown as "1 email every 36 s". If the plan exceeds what the selected senders may send per hour, the form warns that the extra emails will be deferred. | P0 |
+| CMP-7 | **Send from**: choose one or more of the user's connected Gmail senders. Recipients are distributed round-robin across the chosen senders. The default is all of them. With no connected sender, Compose explains how to connect one and the server refuses the campaign (`NO_SENDERS`). | P0 |
 | CMP-8 | **Schedule** sends the campaign to the backend. On success, the form closes, shows a toast ("1,240 emails scheduled"), and refreshes the Scheduled tab. | P0 |
 | CMP-9 | Client-side and server-side validation with inline error messages. | P0 |
 | CMP-10 | A preview line shows the estimated finish time. It comes from a shared function that simulates the plan, including deferral at the sender cap, so the preview and the server's `estimatedFinishAt` agree. | P1 |
@@ -121,7 +121,7 @@ A **campaign** is one compose action. It contains one subject, one body, many re
 | SNT-1 | A table with the columns **Email, Subject, Sent time, Status** (`sent` or `failed`). | P0 |
 | SNT-2 | Sorted by sent time, descending. | P0 |
 | SNT-3 | **Loading** and **empty** states. | P0 |
-| SNT-4 | A **Preview** link opens the Ethereal message URL, so anyone can verify delivery. | P1 |
+| SNT-4 | A **View** link opens the sent message in the sender's Gmail. | P1 |
 | SNT-5 | Failed rows show the error reason. | P1 |
 
 ### 6.5 Search (Elasticsearch)
@@ -138,11 +138,12 @@ A **campaign** is one compose action. It contains one subject, one body, many re
 | ID | Requirement | Priority |
 |---|---|---|
 | SCD-1 | Each email is a **BullMQ delayed job** whose delay is computed from its `scheduled_at`. No cron. | P0 |
-| SCD-2 | Emails are sent through **Ethereal SMTP** from **multiple sender accounts**. | P0 |
+| SCD-2 | Emails are sent through the **Gmail API** from the user's **connected Gmail accounts** (one or more). | P0 |
 | SCD-3 | **Persistence.** Jobs survive restarts of the API, the worker, and Redis (with Redis AOF on). When the API or the worker boots, a reconciler re-enqueues any `scheduled` or `deferred` email that has no live job in Redis, and marks emails stuck in `sending` past their lease as `failed` (`interrupted`). | P0 |
 | SCD-4 | **Idempotency.** The job ID equals the email ID, sends are claimed in the database with an atomic status transition, and the send happens only after a successful claim. | P0 |
-| SCD-5 | SMTP errors that happen before the message data is sent (connection, auth, envelope `4xx`) are retried up to 3 times with exponential backoff. Errors during or after `DATA`, where the message may already have been accepted, are **not** retried; the email is marked `failed`, so it can't be duplicated. Permanent failures are marked `failed` with a reason. | P0 |
-| SCD-6 | The send time and the Ethereal message ID and preview URL are stored. | P0 |
+| SCD-5 | Send errors where Gmail **certainly did not accept** the message (token refresh failures, a refused connection, `401`, `429`, and Gmail rate-limit `403`s) are retried up to 3 times with exponential backoff. Errors where it may have been accepted (`5xx`, timeouts, a connection dropped mid-request) are **not** retried; the email is marked `failed`, so it can't be duplicated. Permanent failures (bad request, revoked access) are marked `failed` with a reason. | P0 |
+| SCD-6 | The send time, the Gmail message ID, and a link to the message in Gmail are stored. | P0 |
+| SCD-7 | If a sender is disconnected or its Google access is revoked, its pending emails are marked `failed` ("sender disconnected") when their time comes, never sent from another account. | P0 |
 
 ### 6.7 Throughput, rate limiting, and concurrency
 
@@ -150,7 +151,7 @@ A **campaign** is one compose action. It contains one subject, one body, many re
 |---|---|---|
 | RL-1 | The worker's **concurrency** is configurable through `WORKER_CONCURRENCY` (default 5). | P0 |
 | RL-2 | A **minimum gap between sends per sender**, configured through `MIN_SEND_GAP_MS` (default 2000 ms), is enforced with Redis so it holds across workers. Each waiting job reserves its own future slot, so a backlog drains smoothly instead of colliding. | P0 |
-| RL-3 | A **per-sender hourly cap**, configured through `MAX_EMAILS_PER_HOUR_PER_SENDER` (default 200), uses Redis counters keyed by `sender + hour window`. It is shared by all campaigns. | P0 |
+| RL-3 | A **per-sender hourly cap** that the user sets for each sender (default 20, at most the server maximum `MAX_EMAILS_PER_HOUR_PER_SENDER`, default 200), using Redis counters keyed by `sender + hour window`. It is shared by all of that sender's campaigns. | P0 |
 | RL-4 | The **campaign hourly limit** is applied when the campaign is planned (by the email spacing), so a campaign never has to be deferred to respect its own limit. It is also checked at runtime as a safety net, for example when catching up after downtime. | P0 |
 | RL-5 | When a limit is hit, the job is **deferred to the next hour window** (status `deferred`) in its **planned order** (best effort; jobs due within the same few milliseconds may swap). Jobs are never dropped or failed because of a limit. | P0 |
 | RL-6 | All limit checks are **atomic** (Redis Lua scripts) and safe with multiple worker processes. | P0 |
@@ -175,9 +176,21 @@ A **campaign** is one compose action. It contains one subject, one body, many re
 |---|---|---|
 | QD-1 | **Bull Board** is mounted at `/admin/queues` on the API and shows live jobs, delays, failures, and retries. | P0 |
 | QD-2 | It is protected with HTTP basic auth, using credentials from the environment. | P0 |
-| QD-3 | The dashboard header links to it. | P1 |
+| QD-3 | It is an **operator** tool: it shows every user's jobs and has raw controls (retry, promote, delete) that bypass pacing, so the product UI never links to it. Users see their own emails on the Scheduled and Sent pages instead. | P0 |
 
-### 6.10 Dashboard overview
+### 6.10 Senders and settings
+
+| ID | Requirement | Priority |
+|---|---|---|
+| SET-1 | Settings has a **Connect Gmail** button that starts Google OAuth with the `gmail.send` scope (plus `openid email profile` to learn the address). The refresh token is stored encrypted, per user. Connecting the same address again refreshes its access instead of adding a duplicate. | P0 |
+| SET-2 | If the user unticks the Gmail permission on Google's consent screen, nothing is saved and Settings explains that Cadence needs it to send. | P0 |
+| SET-3 | Each sender shows its address, a **label** and a **display name** (the name recipients see), its **hourly limit**, and this hour's usage. All three are editable. | P0 |
+| SET-4 | **Disconnect** revokes the token at Google and deactivates the sender. Past emails keep their history. | P0 |
+| SET-5 | A sender whose Google access stops working (revoked, password changed) is marked **Reconnect needed** and is not offered in Compose until reconnected. | P0 |
+| SET-6 | **Campaign defaults**: the user saves a default delay and hourly limit, which Compose pre-fills. | P1 |
+| SET-7 | Server-wide limits (minimum gap, the per-sender maximum, worker concurrency, recipients per campaign) are shown read-only. | P2 |
+
+### 6.11 Dashboard overview
 
 | ID | Requirement | Priority |
 |---|---|---|
@@ -197,7 +210,7 @@ Full details are in tech-spec §6 and design.md §8.
 | `/dashboard/scheduled` | Pace strip, readouts, and the scheduled emails table grouped by hour | Private |
 | `/dashboard/sent` | Sent emails table | Private |
 | `/dashboard/search` | Elasticsearch-backed search results | Private |
-| `/dashboard/settings` | Integrations (Slack), senders, and limits (read-only) | Private |
+| `/dashboard/settings` | Gmail senders (connect, edit, disconnect), campaign defaults, Slack, and server limits (read-only) | Private |
 | _Compose panel_ | Side panel with a live preview, opens over any dashboard page (`?compose=1`) | Private |
 
 ## 8. Non-functional requirements
@@ -207,7 +220,7 @@ Full details are in tech-spec §6 and design.md §8.
 | **Reliability** | Zero duplicate sends in restart and kill tests. Zero lost jobs after restarting the API, the worker, or Redis. |
 | **Accuracy** | An email is never sent before `scheduled_at`. Under normal load it goes out within 5 seconds of its eligible time (excluding deliberate deferral). |
 | **Scale** | Accepts a 5,000-recipient campaign in under 3 seconds, using batched database inserts and BullMQ `addBulk`. |
-| **Security** | JWTs are verified through JWKS. Every query is scoped by `user_id`. Slack secrets are encrypted with AES-256-GCM. Requests are validated with Zod. Bull Board is behind auth. Secrets are never committed. |
+| **Security** | JWTs are verified through JWKS. Every query is scoped by `user_id`. Gmail refresh tokens and Slack secrets are encrypted with AES-256-GCM. Google user data is used only to send the user's own campaigns (Google API Services User Data Policy, Limited Use). Requests are validated with Zod. Bull Board is behind auth. Secrets are never committed. |
 | **Performance** | Dashboard tables load in under 500 ms (p95) for 10,000 rows, using indexed cursor pagination. |
 | **Accessibility** | WCAG 2.1 AA contrast, full keyboard navigation, and visible focus rings. |
 | **Code quality** | Strict TypeScript, shared Zod schemas between front and back end, ESLint and Prettier, and unit tests for the rate limiter and scheduling math. |
@@ -217,10 +230,11 @@ Full details are in tech-spec §6 and design.md §8.
 ## 9. Acceptance criteria
 
 1. A user signs in with Google and the header shows their name, email, and avatar.
+1a. In Settings they connect a Gmail account, which then appears as a sender with its address and an hourly limit of 20.
 2. Uploading a CSV shows the detected count. The user schedules emails a couple of minutes in the future, and they appear in **Scheduled**.
-3. They move to **Sent** on time, and the Ethereal preview link opens the real message.
+3. They move to **Sent** on time, the messages arrive in the recipients' inboxes, and the View link opens each one in the sender's Gmail.
 4. **Restart test:** stop the API and worker, wait until past a scheduled time, start them again. The overdue emails send immediately, exactly once, and future emails keep their times.
-5. **Rate limit:** with a low cap (`MAX_EMAILS_PER_HOUR_PER_SENDER=5` for testing), schedule 30 emails with "Send now", a 2 s delay and an hourly limit of 3,600, so the caps are hit within about a minute. Extra emails show `deferred` with next-hour times, and **a Slack message arrives live**.
+5. **Rate limit:** with a low cap (set the sender's hourly limit to 5 in Settings), schedule 30 emails with "Send now", a 2 s delay and an hourly limit of 3,600, so the caps are hit within about a minute. Extra emails show `deferred` with next-hour times, and **a Slack message arrives live**.
 6. Disconnect Slack and trigger the limit again: there is no message and no crash. Reconnect and it works again.
 7. Bull Board shows delayed, active, and completed jobs live.
 8. Search finds emails by recipient or subject.
@@ -228,19 +242,21 @@ Full details are in tech-spec §6 and design.md §8.
 ## 10. Assumptions and trade-offs
 
 - **The hour window is a fixed UTC clock hour** (for example, 14:00–14:59), not a sliding window. This is simpler and easy to reason about and test. The trade-off is a possible burst of up to 2× the cap around a window boundary, which is acceptable for this scope.
-- **At-most-once on crash during an SMTP call.** If a worker dies after the SMTP server accepted a message but before the database was updated, the email is marked `failed` (reason: `interrupted`) instead of being retried. We prefer a rare missed send over a duplicate, because for outreach a duplicate email does more damage than a missed one.
-- **Senders are pre-provisioned** Ethereal accounts, set through the environment or a seed script. There is no UI for adding SMTP credentials. Senders are **shared by all users**, so their hourly caps are shared too. That is fine for a single-user demo, and per-user senders would be a v2 change.
+- **At-most-once on crash during a send.** If a worker dies after Gmail accepted a message but before the database was updated, the email is marked `failed` (reason: `interrupted`) instead of being retried. We prefer a rare missed send over a duplicate, because for outreach a duplicate email does more damage than a missed one.
+- **Senders are per user.** Each user connects their own Gmail accounts; nobody can send from another user's sender, and each sender's hourly cap counts only its owner's campaigns. Gmail allows about 500 recipients a day on a personal account (2,000 on Workspace), so the default per-sender limit is 20 an hour.
+- **Google verification.** `gmail.send` is a sensitive scope. Until Google verifies the app, users see an "unverified app" screen and the app is limited to 100 users. Verification needs the privacy policy (`/privacy`) and a short demo video.
+- **No SMTP.** The Gmail API is HTTPS, so hosts that block outbound SMTP no longer matter for sending.
 - **One user is one tenant.** Slack connections and campaigns belong to a user.
 - **Campaign pacing is planned and sender caps are enforced.** A campaign's own delay and hourly limit decide its planned send times. Deferral exists for the shared per-sender cap, so the Scheduled tab shows real times rather than mostly `deferred` rows.
-- **Deployment is free-tier only:** the web app runs on Vercel Hobby. The API, worker, Redis and Elasticsearch run with Docker Compose on an Oracle Cloud Always Free VM, behind Caddy with HTTPS. Postgres and Auth are on Supabase Free. Free PaaS hosts (Render, Railway) block outbound SMTP, which Ethereal needs. See tech-spec §13.2.
+- **Deployment is free-tier only:** the web app runs on Vercel Hobby. The API, worker, Redis and Elasticsearch run with Docker Compose on an Oracle Cloud Always Free VM, behind Caddy with HTTPS. Postgres and Auth are on Supabase Free. The VM keeps Redis and Elasticsearch on the free tier. See tech-spec §13.2.
 - **design.md is the source of truth** for the UI: tokens, components, and page layouts.
 
 ## 11. Milestones (48 hours)
 
 | # | Window | Deliverable |
 |---|---|---|
-| M0 | 0–2 h | Monorepo scaffold, Docker Compose (Redis + Elasticsearch), Supabase project (confirm JWKS returns keys), Google provider, env templates. Provision the Oracle VM and confirm outbound port 587 to Ethereal. |
-| M1 | 2–10 h | Database schema and migrations, campaign API, scheduler (enqueue), worker (send through Ethereal), idempotent claims |
+| M0 | 0–2 h | Monorepo scaffold, Docker Compose (Redis + Elasticsearch), Supabase project (confirm JWKS returns keys), Google provider, env templates. Provision the Oracle VM. |
+| M1 | 2–10 h | Database schema and migrations, campaign API, scheduler (enqueue), worker (send through the Gmail API), idempotent claims |
 | M2 | 10–16 h | Rate limiter (Lua), minimum gap, deferral logic, startup reconciler, restart tests |
 | M3 | 16–26 h | Next.js landing, login, dashboard, compose, and tables, wired to the API |
 | M4 | 26–32 h | Slack OAuth, notifications queue, and settings page |
@@ -253,4 +269,4 @@ Full details are in tech-spec §6 and design.md §8.
 1. Should the hourly window become a sliding window in v2 to remove boundary bursts?
 2. Do we need team workspaces (multi-user tenants) after v1?
 3. ~~Should the hourly limit be global or per sender?~~ **Decided:** the campaign limit is campaign-wide and applied when planning, and the sender cap is per sender and enforced at runtime (RL-3, RL-4).
-4. Should senders become per-user in v2, so that users don't share caps?
+4. ~~Should senders become per-user, so that users don't share caps?~~ **Decided:** yes. Senders are the user's own Gmail accounts (§6.10).

@@ -1,6 +1,6 @@
 # Cadence
 
-Rate-aware email scheduler: Next.js dashboard + Express API + BullMQ worker. Specs live in `docs/`:
+Rate-aware email scheduler: Next.js dashboard + Express API + BullMQ worker, sending from users' own Gmail accounts. Specs live in `docs/`:
 `prd.md` (what), `tech-spec.md` (how; the source of truth for behavior), `design.md` (the source of truth for UI).
 Read the relevant spec section before changing behavior or UI, and update the spec in the same change when they diverge.
 
@@ -15,7 +15,8 @@ Read the relevant spec section before changing behavior or UI, and update the sp
 - No cron or repeatable jobs, ever. Use delayed jobs and boot-time work only (PRD C5).
 - Postgres is the source of truth. Every write to `emails` bumps `version` and `updated_at` (search writes depend on it).
 - The `scheduled|deferred → sending` conditional update is the idempotency guard. Never send without winning it.
-- Only retry SMTP failures that happened before DATA (`classifySmtpError`). Anything ambiguous is marked failed.
+- Only retry send failures where Gmail certainly did not accept the message (`classifySendError`, tech-spec §7.3). Anything ambiguous is marked failed.
+- Senders belong to users. A campaign may only use its owner's active senders, and an email is never moved to another sender.
 - Every query is scoped by `user_id`. Search hits are hydrated from Postgres, scoped to the user.
 - UI: color marks exceptions only (deferred, failed, sending). One primary (signal) button per view. No `·` chains, no all-caps labels, no decorative shadows or gradients (design.md §1, §11).
 

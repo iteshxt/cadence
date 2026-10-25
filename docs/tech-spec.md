@@ -34,7 +34,7 @@
        │        ┌─────────────────────────┐       │
        └────────│  Worker (apps/api,      │───────┘
                 │  entry: worker.ts)      │
-                │  email-send queue       │──▶ Ethereal SMTP (N senders)
+                │  email-send queue       │──▶ Gmail API (users' senders)
                 │  notifications queue    │──▶ Slack Incoming Webhook
                 └─────────────────────────┘
 ```
@@ -59,7 +59,7 @@
 | Database | **Supabase Postgres** | Relational data with managed hosting and auth in one place |
 | Queue | **BullMQ** + **ioredis** | Delayed jobs, retries, stalled-job recovery |
 | Queue UI | **@bull-board/express** | Live dashboard |
-| SMTP | **Nodemailer** → **Ethereal** | Fake SMTP for safe testing, with preview URLs |
+| Email | **Gmail API** (OAuth `gmail.send`), MIME built with Nodemailer's `MailComposer` | Sends from each user's own Gmail account |
 | Search | **Elasticsearch 8** + `@elastic/elasticsearch` | Full-text search over email history |
 | JWT verification | **jose** (JWKS) | Verifies Supabase tokens without a network call per request |
 | Logging | **pino** + pino-http | Structured JSON logs |
@@ -108,22 +108,23 @@ cadence/
 │     │  ├─ config/env.ts                    # Zod-validated env
 │     │  ├─ db/{schema,client,migrate}.ts + migrations/
 │     │  ├─ middleware/{auth,error,validate,basicAuth}.ts
-│     │  ├─ routes/{campaigns,emails,search,slack,misc}.ts   # misc: me, config, senders, stats, timeline
+│     │  ├─ routes/{campaigns,emails,search,slack,gmail,senders,settings,misc}.ts   # misc: me, config, stats, timeline
 │     │  ├─ services/
 │     │  │  ├─ scheduler.service.ts    # create campaign → rows → jobs
 │     │  │  ├─ emails.repo.ts          # every read/write of `emails` (API, worker, reconciler)
-│     │  │  ├─ mailer.service.ts       # nodemailer transports per sender, SMTP error classes
+│     │  │  ├─ gmail.service.ts        # Gmail OAuth, token cache, send, error classes (§7.3)
 │     │  │  ├─ ratelimit.service.ts    # Lua slot reservation, deferral and alert bookkeeping
 │     │  │  ├─ search.service.ts       # ES index/query
 │     │  │  ├─ slack.service.ts        # OAuth + webhook posts
 │     │  │  ├─ timeline.service.ts     # pace strip data
-│     │  │  ├─ senders.service.ts      # senders + current-hour usage
+│     │  │  ├─ senders.service.ts      # the user's senders: list with usage, edit, disconnect
+│     │  │  ├─ settings.service.ts     # per-user Compose defaults
 │     │  │  └─ reconciler.service.ts   # boot-time repair
 │     │  ├─ queues/{connection,emailQueue,notifyQueue}.ts
 │     │  ├─ jobs/{sendEmail.processor,notify.processor}.ts
 │     │  ├─ lua/reserve_send.lua
 │     │  └─ lib/{crypto,logger,errors,cursor}.ts
-│     ├─ scripts/{seed-senders,reindex,load-test}.ts
+│     ├─ scripts/{reindex,load-test}.ts
 │     ├─ test/                   # vitest + supertest + testcontainers
 │     └─ Dockerfile
 ├─ packages/
@@ -155,19 +156,25 @@ create table profiles (
   email       text not null,
   full_name   text,
   avatar_url  text,
+  default_delay_seconds int,              -- Compose defaults (SET-6); null = product default
+  default_hourly_limit  int,
   created_at  timestamptz not null default now()
 );
 
-create table senders (                    -- Ethereal accounts
-  id           uuid primary key default gen_random_uuid(),
-  label        text not null,             -- "Sender A"
-  from_email   text not null unique,
-  smtp_host    text not null default 'smtp.ethereal.email',
-  smtp_port    int  not null default 587,
-  smtp_user    text not null,
-  smtp_pass_enc text not null,            -- AES-256-GCM
-  is_active    boolean not null default true,
-  created_at   timestamptz not null default now()
+create table senders (                    -- a user's connected Gmail accounts
+  id                uuid primary key default gen_random_uuid(),
+  user_id           uuid references profiles(id) on delete cascade,  -- null only for retired v1 Ethereal rows
+  provider          text not null default 'gmail',
+  label             text not null,        -- the user's name for it; defaults to the address
+  from_email        citext not null,
+  display_name      text,                 -- the "From" name recipients see
+  hourly_limit      int  not null default 20,   -- 1..MAX_EMAILS_PER_HOUR_PER_SENDER
+  refresh_token_enc text,                 -- AES-256-GCM; null once disconnected
+  is_active         boolean not null default true,
+  needs_reconnect   boolean not null default false,  -- Google rejected the refresh token
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now(),
+  unique (user_id, from_email)
 );
 
 create table campaigns (
@@ -240,22 +247,29 @@ create table rate_limit_events (          -- audit trail
 | `scheduled` / `deferred` | `sending` | The worker reserved capacity and won the claim (§7.2 step 4) |
 | `scheduled` / `deferred` | `deferred` | An hourly limit was hit **before** the claim (§9.3) |
 | `scheduled` / `deferred` | `cancelled` | The user cancelled (P2) |
-| `sending` | `sent` | SMTP accepted the message |
-| `sending` | `scheduled` | A *retryable* SMTP error with attempts left (§7.2 step 7) |
-| `sending` | `failed` | Final attempt failed, an ambiguous SMTP error, or the lease expired (`interrupted`) |
+| `sending` | `sent` | Gmail accepted the message |
+| `sending` | `scheduled` | A *retryable* send error with attempts left (§7.2 step 7) |
+| `scheduled` / `deferred` | `failed` | The sender was disconnected or needs reconnecting when the email came due (`sender disconnected`) |
+| `sending` | `failed` | Final attempt failed, an ambiguous send error, or the lease expired (`interrupted`) |
 
 Every update sets `updated_at = now()` and `version = version + 1`.
 
 ## 5. API specification (Express)
 
-The base URL is `/api`. Every route except health, the Slack callback, and Bull Board requires `Authorization: Bearer <supabase_access_token>`. Responses are JSON. Errors use the shape `{ error: { code, message, details? } }`.
+The base URL is `/api`. Every route except health, the Slack and Gmail callbacks, and Bull Board requires `Authorization: Bearer <supabase_access_token>`. Responses are JSON. Errors use the shape `{ error: { code, message, details? } }`.
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/health` | Liveness, plus Redis, database, and Elasticsearch checks |
 | GET | `/api/me` | Profile (upserted by the auth middleware) |
-| GET | `/api/config` | Read-only limits for the UI: `{ workerConcurrency, minSendGapMs, maxPerHourPerSender, maxRecipients, startGraceMs }` |
-| GET | `/api/senders` | Active senders (no secrets) and current-hour usage |
+| GET | `/api/config` | Read-only server limits for the UI: `{ workerConcurrency, minSendGapMs, maxPerHourPerSender, maxRecipients, startGraceMs }`. `maxPerHourPerSender` is the ceiling for each sender's own limit. |
+| GET | `/api/senders` | The user's active senders (no secrets): `{ id, label, fromEmail, displayName, cap, status: 'connected' \| 'reconnect', usedThisHour, resetsAt }` |
+| PATCH | `/api/senders/:id` | `{ label?, displayName?, hourlyLimit? }`; `hourlyLimit` is 1 to the server maximum |
+| DELETE | `/api/senders/:id` | Disconnect: revokes the token at Google, clears it, and deactivates the sender |
+| POST | `/api/integrations/gmail/authorize` | Returns `{ url }`: Google's consent screen with a signed state (§7.3) |
+| GET | `/api/integrations/gmail/callback` | Google's redirect target (public). Stores the sender, then redirects to `/dashboard/settings?gmail=connected\|cancelled\|scope\|error` |
+| GET | `/api/settings` | `{ defaultDelaySeconds, defaultHourlyLimit }` (product defaults when unset) |
+| PUT | `/api/settings` | Saves both defaults (same bounds as the campaign fields) |
 | POST | `/api/campaigns` | Create a campaign and schedule its emails |
 | GET | `/api/campaigns` | The user's campaigns with progress counts |
 | GET | `/api/emails` | `?view=scheduled\|sent&cursor=&limit=25` |
@@ -357,7 +371,7 @@ Feeds the dashboard pace strip (design.md §7.1). The range is capped at 24 hour
 | `/auth/callback` | Route handler | Code exchange and redirect. |
 | `/dashboard` | Server | Redirects to `/dashboard/scheduled`. |
 | `/dashboard/scheduled` | Client islands | Page title with strip range control, `PaceStrip` (`/api/timeline`), `Readouts` (`/api/stats`), `EmailTable view="scheduled"` grouped by hour. Polls every 5 seconds. |
-| `/dashboard/sent` | Client islands | Same shell, strip showing the last 3 hours. `EmailTable view="sent"` with the "View in Ethereal" link and failure reasons inline. |
+| `/dashboard/sent` | Client islands | Same shell, strip showing the last 3 hours. `EmailTable view="sent"` with the "View" link (opens the message in Gmail) and failure reasons inline. |
 | `/dashboard/search` | Client | Uses `?q=`. A results table (no hour groups) with a status segmented control and highlighted matches. |
 | `/dashboard/settings` | Client | Sections per design.md §8.4: **Slack** (Connect, or Connected to #channel in Workspace, with Send test message and Disconnect). **Senders** with this hour's usage meter. **Sending limits** from `GET /api/config`. A link to Bull Board. |
 | Compose | Side panel | Opened by the button or `?compose=1`. See §6.3. |
@@ -440,6 +454,7 @@ Processor steps for `{ emailId }`:
 
 1. **Load** the email, campaign, and sender.
    - If the status is `sent`, `failed`, or `cancelled`, return immediately. (This makes the processor idempotent.)
+   - If the email is pending and its sender is inactive or `needs_reconnect`, mark it `failed` with `sender disconnected` and return. It is never moved to another sender.
    - If the status is `sending`, a previous attempt claimed it and then disappeared (a crash, or a stalled job).
      - If `claimed_at` is older than the lease (`SEND_LEASE_MS`, 2 minutes), mark the email `failed` with error `interrupted` and return. This is at-most-once by design.
      - If the lease has **not** expired yet, call `job.moveToDelayed(claimed_at + SEND_LEASE_MS, token)` and throw `DelayedError`, so the job checks again once the lease is over. Never "return" here, because that would leave the row stuck in `sending` forever.
@@ -454,16 +469,44 @@ Processor steps for `{ emailId }`:
    where id=$1 and status in ('scheduled','deferred') returning *;
    ```
    If no row comes back, another worker already has it, so return. This is the core idempotency guard.
-5. **Send** through Nodemailer using the cached transport for the sender. Set `messageId: <emailId@cadence.local>`, which gives a deterministic Message-ID.
+5. **Send** through the Gmail API (§7.3) from the email's sender. The MIME message carries `Message-ID: <emailId@cadence.local>`, which is deterministic.
 6. **On success:**
-   - Update the row: `status='sent'`, `sent_at = finished_at = now()`, `message_id`, `preview_url = nodemailer.getTestMessageUrl(info)`.
+   - Update the row: `status='sent'`, `sent_at = finished_at = now()`, `message_id` (the Gmail message ID), `preview_url` (a link that opens the message in the sender's Gmail).
    - Update the Elasticsearch document.
-7. **On SMTP error**, classify it using Nodemailer's `err.command` and `err.responseCode`:
-   - **Retryable:** the failure happened *before* the message data was sent. That means `err.command` is `CONN`, `EHLO`, `AUTH`, `MAIL FROM` or `RCPT TO` (or a connection error with no command), and there is no `5xx` response code. If attempts remain, revert the row to `scheduled` (clearing `claimed_at` and `job.data.slotAt`) and rethrow so BullMQ retries with backoff.
-   - **Ambiguous:** the failure happened during or after `DATA`, for example a timeout or a dropped socket. The server may already have accepted the message, so retrying could send a duplicate. Mark it `failed` with error `ambiguous: <message>` and do not retry. This is the same rule as the PRD's at-most-once trade-off.
-   - **Permanent** (`5xx`), or the final attempt: mark it `failed` with the error message and set `finished_at`.
+7. **On a send error**, classify it with `classifySendError` (§7.3):
+   - **Retryable:** Gmail certainly did not accept the message: the access-token refresh failed, the connection was refused before the request was sent, or Gmail answered `401`, `429`, or a rate-limit `403`. If attempts remain, revert the row to `scheduled` (clearing `claimed_at` and `job.data.slotAt`) and rethrow so BullMQ retries with backoff.
+   - **Ambiguous:** Gmail may have accepted it: a `5xx`, a timeout, or a connection dropped after the request went out. Retrying could send a duplicate, so mark it `failed` with error `ambiguous: <message>` and do not retry. This is the PRD's at-most-once trade-off.
+   - **Permanent** (`400`, other `4xx`, or revoked access), or the final attempt: mark it `failed` with the error message and set `finished_at`. Revoked access also marks the sender `needs_reconnect`.
    - Update the Elasticsearch document in every case.
 8. **Any other error** (the database or Redis is briefly unavailable, or a bug): if attempts remain, rethrow so BullMQ retries. On the final attempt, make a best-effort update that marks the row `failed` with the reason, so a row never stays `scheduled` behind a failed BullMQ job. If that update also fails, the reconciler repairs the row on the next boot (§8).
+
+### 7.3 Gmail (`gmail.service.ts`)
+
+**Connecting (OAuth 2.0 authorization code flow, run by the API):**
+
+1. `POST /api/integrations/gmail/authorize` returns Google's consent URL with `scope=openid email profile https://www.googleapis.com/auth/gmail.send`, `access_type=offline`, `prompt=consent` (so Google always returns a refresh token), `include_granted_scopes=true`, and a `state` that is an HS256 JWT signed with `STATE_SECRET` (subject = user ID, audience `gmail-oauth`, 10-minute expiry), the same pattern as Slack.
+2. Google redirects to `GMAIL_REDIRECT_URI` (`/api/integrations/gmail/callback`). The API verifies the state, exchanges the code at `https://oauth2.googleapis.com/token`, and checks that the granted `scope` includes `gmail.send`; Google's consent screen lets users untick it, in which case nothing is stored and Settings shows `?gmail=scope`.
+3. The address and name come from the `id_token` in the token response. It arrives directly from Google over TLS, so its payload is read without a signature check (Google's documented exception). An address that isn't `email_verified` is refused.
+4. The sender is upserted on `(user_id, from_email)`: a reconnect replaces the refresh token and clears `needs_reconnect` and `is_active=false`, keeping the label, display name, and limit. A new sender gets label = address, display name = the Google name, and `hourly_limit = min(20, MAX_EMAILS_PER_HOUR_PER_SENDER)`.
+
+**Sending:**
+
+- **Access tokens** are refreshed from the stored refresh token and cached in the worker's memory per sender until 60 s before they expire. A `401` from Gmail drops the cached token, so the retry refreshes it.
+- **The message** is built with Nodemailer's `MailComposer` (From = display name and address, To, Subject, plain-text body, the deterministic Message-ID) and posted base64url-encoded to `POST https://gmail.googleapis.com/gmail/v1/users/me/messages/send`. The response's `id` is stored as `message_id`; `preview_url` is `https://mail.google.com/mail/?authuser=<from>#all/<id>`.
+- **Errors** are `GmailError`s carrying a `kind` that `classifySendError` reads (anything else is `ambiguous`):
+
+| Phase | Outcome | Kind |
+|---|---|---|
+| Token refresh | network error, `5xx` | retryable (nothing was sent) |
+| Token refresh | `invalid_grant` (revoked, password changed) | permanent; the sender is marked `needs_reconnect` |
+| Token refresh | other `4xx` | permanent |
+| Send | connection refused or DNS failure before the request (`ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`) | retryable |
+| Send | `401` | retryable (cached token dropped) |
+| Send | `429`, or `403` with reason `rateLimitExceeded` / `userRateLimitExceeded` | retryable |
+| Send | other `4xx` | permanent |
+| Send | `5xx`, timeout, connection reset mid-request | ambiguous (never retried) |
+
+**Disconnecting** posts the refresh token to `https://oauth2.googleapis.com/revoke` (best effort), then sets `refresh_token_enc = null`, `is_active = false`.
 
 ## 8. Persistence and restart behavior
 
@@ -496,10 +539,11 @@ This is safe to run any number of times, because the database claim (§7.2 step 
 |---|---|---|
 | `WORKER_CONCURRENCY` | `5` | Parallel jobs per worker process |
 | `MIN_SEND_GAP_MS` | `2000` | Minimum gap between two sends **from the same sender**, across all workers |
-| `MAX_EMAILS_PER_HOUR_PER_SENDER` | `200` | Hard cap per sender per UTC hour |
-| `GLOBAL_LIMITER_MAX` / `GLOBAL_LIMITER_DURATION_MS` | `10` / `1000` | BullMQ queue-wide limiter, an extra safety net for the SMTP provider |
+| `MAX_EMAILS_PER_HOUR_PER_SENDER` | `200` | The **server maximum** for any sender's hourly limit. Each sender's own `hourly_limit` (set in Settings, default 20) is what the Lua script enforces; it is clamped to this maximum when saved and again when sending. |
+| `GLOBAL_LIMITER_MAX` / `GLOBAL_LIMITER_DURATION_MS` | `10` / `1000` | BullMQ queue-wide limiter, an extra safety net for the email provider |
 | `SEND_LEASE_MS` | `120000` | How long a `sending` claim is trusted before it counts as interrupted (§7.2) |
 | `START_GRACE_MS` | `300000` | How far in the past `startAt` may be (§5) |
+| `SEND_DRY_RUN` | `false` | When `true`, the worker goes through every step (slots, caps, claims, deferral) but records the send instead of calling Gmail (`message_id = dry-run-<emailId>`, no link). For the load test and for local runs without Google credentials. Never set in production. |
 | Campaign `hourlyLimit` | from the form | Campaign-wide emails per hour. It is applied when the plan is made (`intervalMs`, §7.1) and checked again at runtime as a safety net, which matters for catch-up after downtime. It is **not** clamped to the sender capacity. Any overflow beyond what the senders can handle is deferred, and that is how the rate-limit demo works. |
 
 ### 9.2 Atomic slot reservation (`lua/reserve_send.lua`)
@@ -576,7 +620,7 @@ Example: a campaign starting at 14:00 UTC with 1,000 recipients, 3 senders, `del
 
 The same steps apply at 10,000 or more, only with more windows. Redis memory per delayed job is about 1 KB, so 100,000 jobs take about 100 MB, which is acceptable.
 
-The script `pnpm load-test --count 1000 --start now` makes this reproducible.
+The script `pnpm load-test --count 1000 --start now` makes this reproducible. It refuses to run unless `SEND_DRY_RUN=true`, because its generated recipients must never receive real email.
 
 ## 10. Slack integration
 
@@ -621,10 +665,12 @@ The script `pnpm load-test --count 1000 --start now` makes this reproducible.
 
 - **JWT:** verified with `jose.createRemoteJWKSet(${SUPABASE_URL}/auth/v1/.well-known/jwks.json)`, checking `aud=authenticated` and `iss=${SUPABASE_URL}/auth/v1`. `req.user = { id, email, fullName, avatarUrl }`. This requires the project to use **asymmetric JWT signing keys**, which is the default for projects created since late 2025. In M0, confirm under *Project Settings → JWT Keys* that the JWKS endpoint returns at least one key. If it returns an empty `keys` array, the project is still on the legacy shared secret and must be migrated before any API call will authenticate.
 - **Authorization:** every query filters by `user_id = req.user.id`. Elasticsearch queries are always filtered by `userId`.
-- **Secrets:** SMTP passwords and Slack tokens are encrypted with AES-256-GCM using `ENCRYPTION_KEY` (32 bytes, base64).
+- **Secrets:** Gmail refresh tokens and Slack tokens are encrypted with AES-256-GCM using `ENCRYPTION_KEY` (32 bytes, base64). Access tokens live only in worker memory.
+- **Google user data:** only the address, name, and the `gmail.send` permission are requested, used solely to send the user's own campaigns, never shared or used for anything else (Google API Services User Data Policy, Limited Use). Disconnecting revokes access.
 - **HTTP:** `helmet`, CORS restricted to `WEB_URL`, a 1 MB JSON limit, and `express-rate-limit` on `POST /api/campaigns` (10 requests per minute per user).
 - **Bull Board:** basic auth using `BULL_BOARD_USER` and `BULL_BOARD_PASS`.
-- **Slack OAuth:** the signed, expiring `state` protects against CSRF.
+- **Slack and Gmail OAuth:** the signed, expiring `state` (separate audiences) protects against CSRF and ties the callback to the user.
+- **Senders:** every sender query is scoped by `user_id`; a campaign may only use the requesting user's active senders.
 
 ## 13. Environments and deployment
 
@@ -635,17 +681,16 @@ docker compose up -d                  # redis (AOF, noeviction) + elasticsearch 
                                       # add --profile localdb for a local Postgres instead of Supabase
 pnpm i
 pnpm --filter api db:migrate
-pnpm --filter api seed:senders        # creates 3 Ethereal accounts via nodemailer.createTestAccount()
 pnpm dev                              # turbo: web :3000, api :4000, worker
 ```
 
 ### 13.2 Hosted (all free tiers)
 
-This is a single-user product demo, so the hosting goal is **$0 per month**. The hard requirement that drives the choice is that **the worker must make outbound SMTP connections on port 587 to Ethereal (C4) and run as a long-lived process (BullMQ)**:
+This is a product demo, so the hosting goal is **$0 per month**. The worker sends over HTTPS (the Gmail API), so outbound SMTP no longer constrains hosting. What still drives the choice is that **the worker is a long-lived process (BullMQ)** and Redis and Elasticsearch must run somewhere free:
 
 - **Vercel** can't run the API or worker. Functions are short-lived and can't hold a BullMQ worker. It is perfect for the Next.js app.
-- **Render's free tier** blocks outbound SMTP ports 25, 465 and 587 (since September 2025), and its free services sleep when idle.
-- **Railway** allows outbound SMTP only on Pro, and Hobby has no free tier.
+- **Render's free tier** sleeps idle services, which stops the worker.
+- **Railway** has no free tier.
 - **Koyeb's free tier** requires a card, scales to zero, and offers one web service only (no worker type).
 - **Upstash Redis free** (500K commands per month) would be used up by an idle BullMQ worker's polling and stalled-job checks.
 
@@ -655,14 +700,13 @@ This is a single-user product demo, so the hosting goal is **$0 per month**. The
 | API, worker, Redis, Elasticsearch | **Oracle Cloud Always Free** Ampere A1 VM (up to 4 OCPU / 24 GB RAM, arm64) running `deploy/docker-compose.prod.yml` | Two services from the same image (`start:api`, `start:worker`), Redis 7 with AOF and `noeviction`, Elasticsearch 8. All images have arm64 builds. Only Caddy's ports 80 and 443 are open in the VCN security list. |
 | HTTPS for the API | **Caddy** + a free **DuckDNS** subdomain (e.g. `cadence-api.duckdns.org`) | Automatic Let's Encrypt certificates. HTTPS is required: the Vercel site can't call a plain-HTTP API (mixed content), and Slack requires an HTTPS redirect URL. |
 | Postgres and Auth | **Supabase Free** | Use the **session pooler** connection string (IPv4, port 5432). The direct connection is IPv6-only. Free projects pause after 7 days without activity, so open the app before a demo. |
-| SMTP | **Ethereal** | Free. |
-| OAuth | Google Cloud (free), Slack app (free) | Google allows the Supabase callback. Supabase allows the Vercel URL. The Slack redirect points to `https://<duckdns>/api/integrations/slack/callback`. |
+| Email | **Gmail API** | Free, within each Gmail account's sending limits. |
+| OAuth | Google Cloud (free), Slack app (free) | The Google OAuth client allows two redirect URIs: the Supabase callback (sign-in) and `https://<duckdns>/api/integrations/gmail/callback` (Connect Gmail). The Gmail API is enabled and `gmail.send` is on the consent screen. Supabase allows the Vercel URL. The Slack redirect points to `https://<duckdns>/api/integrations/slack/callback`. |
 
 **Day-one checks (M0), before writing app code:**
 
-1. From the VM, run `nc -zv smtp.ethereal.email 587`. Oracle blocks port 25 by default, and 587 is expected to work, but verify it.
-2. Confirm that the Supabase JWKS endpoint returns keys (§12).
-3. Oracle needs a card for identity verification (it is not charged on Always Free). Ampere capacity can be "out of host capacity" in busy regions, so try another availability domain or retry later.
+1. Confirm that the Supabase JWKS endpoint returns keys (§12).
+2. Oracle needs a card for identity verification (it is not charged on Always Free). Ampere capacity can be "out of host capacity" in busy regions, so try another availability domain or retry later.
 
 **Fallback (no Oracle account):** run `deploy/docker-compose.prod.yml` on your own machine during the demo, with Caddy replaced by an **ngrok** free static domain as the public HTTPS URL. Everything else is unchanged. The downside is that the backend is only up while your machine is.
 
@@ -685,9 +729,13 @@ GLOBAL_LIMITER_MAX=10
 GLOBAL_LIMITER_DURATION_MS=1000
 SEND_LEASE_MS=120000
 START_GRACE_MS=300000
+SEND_DRY_RUN=false                             # true: record sends without calling Gmail (load test)
 SLACK_CLIENT_ID=
 SLACK_CLIENT_SECRET=
 SLACK_REDIRECT_URI=http://localhost:4000/api/integrations/slack/callback  # prod: https://<duckdns>/api/...
+GOOGLE_CLIENT_ID=                               # the same OAuth client as Supabase sign-in
+GOOGLE_CLIENT_SECRET=
+GMAIL_REDIRECT_URI=http://localhost:4000/api/integrations/gmail/callback  # prod: https://<duckdns>/api/...
 BULL_BOARD_USER=admin
 BULL_BOARD_PASS=change-me
 # deploy (VM only)
@@ -707,12 +755,13 @@ NEXT_PUBLIC_API_URL=http://localhost:4000       # prod: https://cadence-api.duck
 |---|---|
 | Unit (shared) | `campaignIntervalMs`, hour windows, start-time grace, `deferTargetMs`, and `estimateFinish()` against the §9.5 example, acceptance test 5, other campaigns' usage, and the 5,000-recipient worst case (< 100 ms). Schema rules (blank text, dedupe, bounds). |
 | Unit (web) | CSV/TXT parsing (email-column detection, cell scanning, dedupe, BOM, invalid counts). Formatting (hour windows in half-hour zones, relative times, durations, timezone labels). |
-| Unit (API) | SMTP error classification (retryable, ambiguous, permanent). AES-256-GCM round trip and tamper detection. JWT claim mapping. Cursors. Slack copy. Timeline bucket sizes. |
+| Unit (API) | Gmail error classification for every row of the §7.3 table. AES-256-GCM round trip and tamper detection. JWT claim mapping. Cursors. Slack copy. Timeline bucket sizes. |
 | Integration (Redis) | Lua reservation under 50 parallel calls never exceeds the cap, hands out distinct slots exactly `minGap` apart, charges the slot's hour, reports the right scope, and leaves the gap pointer alone on LIMIT. Deferral positions are monotonic. One alert per user, sender, and hour. Duplicate `addBulk` with the same job ID produces one job. |
-| Integration (worker) | A real BullMQ worker with a fake SMTP send: exactly-once sends on time; two jobs for one email still send once; ten concurrent claims have one winner; overflow deferred to the next hour in planned order with one alert per sender and no failed jobs; a pre-DATA error is retried once; an ambiguous DATA error is not retried; expired and live leases end as `interrupted` without resending; the reconciler re-adds lost jobs, replaces stale failed jobs, settles expired claims, and is idempotent and locked; 5,000 recipients scheduled in well under 3 seconds; a Slack alert released when not connected; Slack OAuth state, posting, and dead-webhook cleanup. |
-| Integration (API) | Through supertest: auth errors, profile upsert on first call, field-level validation errors, start-time grace and `START_IN_PAST`, `Idempotency-Key` (sequential and a concurrent double-click), sender selection, cursor pagination with totals, cross-user isolation, cancel, stats and timeline, config and senders without secrets, health, Bull Board basic auth, Slack not configured, callback redirects. |
+| Integration (worker) | A real BullMQ worker with a fake send function: exactly-once sends on time; two jobs for one email still send once; ten concurrent claims have one winner; overflow deferred to the next hour in planned order with one alert per sender and no failed jobs; a retryable send error is retried once; an ambiguous one is not retried; a disconnected sender's email fails without sending; each sender's own hourly limit is enforced; expired and live leases end as `interrupted` without resending; the reconciler re-adds lost jobs, replaces stale failed jobs, settles expired claims, and is idempotent and locked; 5,000 recipients scheduled in well under 3 seconds; a Slack alert released when not connected; Slack OAuth state, posting, and dead-webhook cleanup. |
+| Integration (API) | Through supertest: auth errors, profile upsert on first call, field-level validation errors, start-time grace and `START_IN_PAST`, `Idempotency-Key` (sequential and a concurrent double-click), sender selection, cursor pagination with totals, cross-user isolation, cancel, stats and timeline, config and senders without secrets, sender edits and disconnect scoped to the owner, settings, health, Bull Board basic auth, Slack not configured, callback redirects. |
 | Integration (Elasticsearch) | Domain search through the address analyzer, subject and body search, user scoping, status filter, stale writes ignored through external versioning, `search_after` paging. |
-| End-to-end, manual | Real Ethereal sends, the restart test, the rate limit plus Slack, and disconnect/reconnect, scripted in the README. |
+| Integration (Gmail) | OAuth state and callback with a stubbed Google: token exchange, missing `gmail.send` scope, unverified address, reconnect upsert; sending with a stubbed Gmail API: token caching and refresh, MIME and Message-ID, `invalid_grant` marks the sender for reconnect. |
+| End-to-end, manual | Real Gmail sends to your own inbox, the restart test, the rate limit plus Slack, and disconnect/reconnect, scripted in the README. |
 
 ## 15. Observability
 
