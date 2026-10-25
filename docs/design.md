@@ -277,7 +277,13 @@ Left-aligned throughout, no centered stack. The page alternates `--canvas` and `
 
 ### 8.2 Login (`/login`)
 
-`--canvas` page with a centered 400 px `--surface` panel (10 px radius, hairline, 32 px padding): the mark, "Sign in to Cadence" (`title`), "Use your Google account to continue." (`--ink-2`), the Google button, and a legal caption. Errors appear in an error banner (§7.7) above the button. A "Back" link with a left chevron icon sits in the top left of the page.
+Minimal and calm: one task on the page.
+
+- **Top bar** (80 px, no background): the large lockup on the left, linking home, and a ghost **Back to home** button with a left arrow on the right.
+- **Panel:** centered, 440 px wide, 40 px padding (28 px on phones), 10 px radius, hairline border, `--shadow-float`, floating on the same soft teal glow as the landing hero. Inside: "Sign in to Cadence" (30/36, 600), one line of body in `--ink-2` ("Schedule campaigns and watch them send at your pace."), an error banner when the OAuth `error` parameter is present, a full-width 48 px Google button, and a `--sunken` note with a `--signal` shield icon: "This is a demo. Mail goes to Ethereal, a test inbox, and is never delivered to real people."
+- **Below the panel:** one centered caption about data use ("We only use your Google name, email, and photo to sign you in.").
+- **Footer:** "Cadence" on the left and a GitHub link on the right, in `label`/`--ink-3`.
+- **Motion:** the panel rises in on load (the landing `rise` animation); the caption follows 150 ms later. Static under reduced motion.
 
 ### 8.3 Dashboard
 
