@@ -1,0 +1,111 @@
+# Production stack for the free VM (tech-spec §13.2). Run from the repo root:
+#   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --build
+#
+# deploy/.env holds the "api" and "deploy" sections of .env.example (with REDIS_URL and
+# ELASTICSEARCH_URL pointing at the services below). Only Caddy publishes ports.
+name: cadence
+
+x-app: &app
+  build:
+    context: ..
+    dockerfile: apps/api/Dockerfile
+  image: cadence-api:latest
+  env_file: .env
+  environment:
+    NODE_ENV: production
+    REDIS_URL: redis://redis:6379
+    ELASTICSEARCH_URL: http://elasticsearch:9200
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: '10m', max-file: '5' }
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command:
+      [
+        'redis-server',
+        '--appendonly',
+        'yes',
+        '--appendfsync',
+        'everysec',
+        '--maxmemory-policy',
+        'noeviction',
+      ]
+    volumes: [redis-data:/data]
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.2
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'false'
+      ES_JAVA_OPTS: -Xms1g -Xmx1g
+    volumes: [es-data:/usr/share/elasticsearch/data]
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fs http://localhost:9200/_cluster/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  migrate:
+    <<: *app
+    command: ['node', 'dist/src/db/migrate.js']
+    restart: 'no'
+
+  api:
+    <<: *app
+    command: ['node', 'dist/src/server.js']
+    environment:
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      CADENCE_SERVICE: api
+    depends_on:
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:4000/health || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    <<: *app
+    command: ['node', 'dist/src/worker.js']
+    environment:
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      CADENCE_SERVICE: worker
+    # Lets in-flight sends finish before the container is killed (tech-spec §8).
+    stop_grace_period: 60s
+    depends_on:
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  caddy:
+    image: caddy:2.10-alpine
+    ports: ['80:80', '443:443', '443:443/udp']
+    environment:
+      API_DOMAIN: ${API_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [api]
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  es-data:
+  caddy-data:
+  caddy-config:
