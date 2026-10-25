@@ -2,7 +2,6 @@
 
 import { HOUR_MS, estimateFinish, hourIndex, type SenderDto } from '@cadence/shared';
 import { useMemo } from 'react';
-import { cn } from '@/lib/cn';
 import { fmtDayTime, fmtDuration, fmtNumber, plural } from '@/lib/format';
 import { PaceStrip, type StripPoint, type StripWindow } from '../pace/pace-strip';
 import { Readouts } from '../pace/readouts';
@@ -69,15 +68,8 @@ export function ComposePreview({ estimate }: { estimate: ReturnType<typeof useEs
 
   if (!estimate || !strip) {
     return (
-      <div className="flex min-h-56 flex-col items-center justify-center gap-4 rounded-panel border border-dashed border-line p-6 text-center">
-        <div aria-hidden className="flex h-7 items-end gap-1.5">
-          {[0, 1, 2, 3].map((i) => (
-            <span key={i} className={cn('h-full w-1.5', i === 3 ? 'bg-signal' : 'bg-line')} />
-          ))}
-        </div>
-        <p className="max-w-[30ch] text-body text-ink-2">
-          Add recipients to see when each email will go out.
-        </p>
+      <div className="flex min-h-48 flex-col justify-center rounded-panel border border-dashed border-line p-6 text-center">
+        <p className="text-body text-ink-2">Add recipients to see when each email will go out.</p>
       </div>
     );
   }
@@ -95,7 +87,7 @@ export function ComposePreview({ estimate }: { estimate: ReturnType<typeof useEs
         from={strip.from}
         to={strip.to}
         summary={`Planned: ${plural(input.count, 'email')} across ${plural(input.senders.length, 'sender')}, from ${fmtDayTime(est.firstAtMs!)} to about ${fmtDayTime(est.finishAtMs!)}.`}
-        className="p-3 shadow-float"
+        className="p-3"
       />
       <Readouts
         items={[

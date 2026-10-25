@@ -7,7 +7,7 @@ import {
   type CreateCampaignResponse,
 } from '@cadence/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Timer, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { Dialog } from 'radix-ui';
 import {
@@ -110,7 +110,7 @@ export function ComposePanel() {
           onPointerDownOutside={(ev) => (ev.preventDefault(), requestClose.current())}
           onInteractOutside={(ev) => ev.preventDefault()}
           aria-describedby={undefined}
-          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[920px] flex-col bg-surface shadow-float outline-none will-change-transform motion-safe:data-[state=closed]:animate-panel-out motion-safe:data-[state=open]:animate-panel-in"
+          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[880px] flex-col bg-surface shadow-float outline-none will-change-transform motion-safe:data-[state=closed]:animate-panel-out motion-safe:data-[state=open]:animate-panel-in"
         >
           <ComposeForm key={session} onClose={close} requestCloseRef={requestClose} />
         </Dialog.Content>
@@ -119,19 +119,10 @@ export function ComposePanel() {
   );
 }
 
-/** A numbered group of fields, like the landing page's campaign steps. */
-function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+/** A group of related fields; groups are separated by a hairline. */
+function Group({ children }: { children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-5 border-t border-line pt-6 first:border-t-0 first:pt-0">
-      <h3 className="flex items-center gap-3 text-section text-ink">
-        <span
-          aria-hidden
-          className="flex size-7 items-center justify-center rounded-control bg-signal-soft text-label text-signal tabular"
-        >
-          {n}
-        </span>
-        {title}
-      </h3>
+    <section className="flex flex-col gap-5 border-t border-line pt-5 first:border-t-0 first:pt-0">
       {children}
     </section>
   );
@@ -285,30 +276,17 @@ function ComposeForm({
 
   return (
     <form onSubmit={onSubmit} noValidate className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-8 py-5 max-md:px-4 max-md:py-4">
-        <div className="min-w-0">
-          <Dialog.Title className="text-[26px] leading-8 font-semibold tracking-[-0.02em] text-ink">
-            New campaign
-          </Dialog.Title>
-          <p className="mt-1 text-body-lg text-ink-2">
-            Write it once, choose the pace, and check the plan before it starts.
-          </p>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Close"
-          onClick={requestClose}
-          className="-mr-2 size-10"
-        >
-          <X strokeWidth={1.5} className="size-5!" />
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-line px-6 max-md:px-4">
+        <Dialog.Title className="text-title text-ink">New campaign</Dialog.Title>
+        <Button variant="ghost" size="icon" aria-label="Close" onClick={requestClose}>
+          <X strokeWidth={1.5} />
         </Button>
       </div>
 
       <div className="grid min-h-0 flex-1 overflow-y-auto md:grid-cols-[minmax(0,1fr)_380px] md:overflow-hidden">
         {/* Form */}
-        <div className="flex flex-col gap-6 px-8 py-7 max-md:px-4 max-md:py-5 md:overflow-y-auto">
-          <Step n={1} title="Message">
+        <div className="flex flex-col gap-6 p-6 max-md:p-4 md:overflow-y-auto">
+          <Group>
             <Field id="subject" label="Subject" error={e.subject?.message} required>
               <Input
                 id="subject"
@@ -316,7 +294,7 @@ function ComposeForm({
                 autoComplete="off"
                 maxLength={LIMITS.SUBJECT_MAX}
                 placeholder="Quick question about Q4"
-                className="h-10 text-body-lg"
+
                 {...describedBy('subject', e.subject?.message)}
                 {...register('subject', {
                   validate: (v) => (v.trim() ? true : 'Subject is required'),
@@ -341,8 +319,7 @@ function ComposeForm({
             >
               <Textarea
                 id="body"
-                rows={7}
-                className="text-body-lg leading-6"
+                rows={8}
                 {...describedBy('body', e.body?.message, true)}
                 {...register('body', {
                   validate: (v) => (v.trim() ? true : 'Message is required'),
@@ -353,11 +330,10 @@ function ComposeForm({
                 })}
               />
             </Field>
-          </Step>
+          </Group>
 
-          <Step n={2} title="Recipients">
+          <Group>
             <RecipientsDropzone
-              label="List"
               value={recipients}
               onChange={(v) => (setRecipients(v), setRecipientsError(undefined))}
               error={recipientsError}
@@ -370,16 +346,16 @@ function ComposeForm({
               loading={senders.isLoading}
               error={senderError}
             />
-          </Step>
+          </Group>
 
-          <Step n={3} title="Pace">
+          <Group>
             <fieldset className="flex flex-col gap-1.5">
               <legend className="mb-1.5 text-label text-ink">Start</legend>
               <div className="flex flex-wrap items-center gap-3">
                 <Input
                   type="date"
                   aria-label="Start date"
-                  className="h-10 w-40"
+                  className="w-40"
                   disabled={values.sendNow}
                   {...describedBy('startTime', e.startTime?.message, true)}
                   {...register('startDate')}
@@ -387,7 +363,7 @@ function ComposeForm({
                 <Input
                   type="time"
                   aria-label="Start time"
-                  className="h-10 w-32"
+                  className="w-32"
                   disabled={values.sendNow}
                   {...describedBy('startTime', e.startTime?.message, true)}
                   {...register('startTime')}
@@ -418,7 +394,6 @@ function ComposeForm({
                   min={LIMITS.DELAY_MIN_SECONDS}
                   max={LIMITS.DELAY_MAX_SECONDS}
                   step={1}
-                  className="h-10"
                   {...describedBy('delaySeconds', e.delaySeconds?.message)}
                   {...register('delaySeconds', {
                     valueAsNumber: true,
@@ -435,7 +410,6 @@ function ComposeForm({
                   min={LIMITS.HOURLY_MIN}
                   max={LIMITS.HOURLY_MAX}
                   step={1}
-                  className="h-10"
                   {...describedBy('hourlyLimit', e.hourlyLimit?.message)}
                   {...register('hourlyLimit', {
                     valueAsNumber: true,
@@ -447,52 +421,41 @@ function ComposeForm({
               </Field>
             </div>
             {intervalMs && (
-              <p className="flex items-center gap-2 rounded-control bg-sunken px-3 py-2.5 text-label text-ink-2">
-                <Timer aria-hidden strokeWidth={1.5} className="size-4 shrink-0 text-signal" />
-                {fmtInterval(intervalMs)}
-              </p>
+              <p className="-mt-2 text-caption text-ink-3">{fmtInterval(intervalMs)}</p>
             )}
-          </Step>
+          </Group>
         </div>
 
         {/* Preview: sticky beside the form on desktop, a collapsible summary on mobile. */}
         <aside
           aria-label="Preview"
-          className="border-line bg-canvas px-6 py-7 max-md:border-t max-md:p-4 md:overflow-y-auto md:border-l"
+          className="border-line bg-canvas p-6 max-md:border-t max-md:p-4 md:overflow-y-auto md:border-l"
         >
           <details className="md:hidden" open={false}>
-            <summary className="cursor-pointer text-section text-ink">Preview</summary>
+            <summary className="cursor-pointer text-label text-ink">Preview</summary>
             <div className="mt-4">
               <ComposePreview estimate={estimate} />
             </div>
           </details>
           <div className="max-md:hidden">
-            <h2 className="text-section text-ink">Preview</h2>
-            <p className="mt-1 mb-5 text-label text-ink-3">
-              Planned with the same limits the worker enforces.
-            </p>
+            <h2 className="mb-4 text-label text-ink-2">Preview</h2>
             <ComposePreview estimate={estimate} />
           </div>
         </aside>
       </div>
 
-      <div className="flex shrink-0 items-center justify-end gap-3 border-t border-line px-8 py-4 max-md:px-4 max-md:py-3">
+      <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line px-6 py-3 max-md:px-4">
         {confirmDiscard ? (
           <div
             role="alertdialog"
             aria-label="Discard this campaign?"
             className="flex w-full flex-wrap items-center justify-end gap-2"
           >
-            <p className="mr-auto text-body-lg text-ink">Discard this campaign?</p>
-            <Button
-              variant="ghost"
-              className="h-10"
-              onClick={() => setConfirmDiscard(false)}
-              autoFocus
-            >
+            <p className="mr-auto text-body text-ink">Discard this campaign?</p>
+            <Button variant="ghost" onClick={() => setConfirmDiscard(false)} autoFocus>
               Keep editing
             </Button>
-            <Button variant="destructive" className="h-10" onClick={onClose}>
+            <Button variant="destructive" onClick={onClose}>
               Discard
             </Button>
           </div>
@@ -504,15 +467,10 @@ function ComposeForm({
                 <span className="text-ink tabular">{fmtDayTime(estimate.est.finishAtMs)}</span>
               </p>
             )}
-            <Button variant="ghost" className="h-10 px-4 text-body-lg" onClick={requestClose}>
+            <Button variant="ghost" onClick={requestClose}>
               Cancel
             </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              className="h-10 px-5 text-body-lg"
-              loading={mutation.isPending}
-            >
+            <Button type="submit" variant="primary" loading={mutation.isPending}>
               {count > 0
                 ? `Schedule ${fmtNumber(count)} ${count === 1 ? 'email' : 'emails'}`
                 : 'Schedule'}
