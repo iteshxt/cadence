@@ -31,6 +31,7 @@ export function useEstimate(input: PreviewInput | null) {
       intervalMs: input.intervalMs,
       senderCount: input.senders.length,
       maxPerHourPerSender: input.maxPerHourPerSender,
+      senderCaps: input.senders.map((s) => s.cap),
       minSendGapMs: input.minSendGapMs,
       existingUsage: input.senders.map((s) => ({ [startHour]: s.usedThisHour })),
       collect: true,
@@ -61,7 +62,7 @@ export function ComposePreview({ estimate }: { estimate: ReturnType<typeof useEs
     }
     const windows: StripWindow[] = [...usage.entries()].map(([k, used]) => {
       const [lane, h] = k.split(':').map(Number);
-      return { lane: lane!, hourStart: h! * HOUR_MS, used, cap: input.maxPerHourPerSender };
+      return { lane: lane!, hourStart: h! * HOUR_MS, used, cap: input.senders[lane!]!.cap };
     });
     return { from, to, points, windows };
   }, [estimate]);
@@ -75,7 +76,10 @@ export function ComposePreview({ estimate }: { estimate: ReturnType<typeof useEs
   }
 
   const { est, input } = estimate;
-  const perSender = Math.min(est.plannedPerSenderPerHour, input.maxPerHourPerSender);
+  const perSender = Math.min(
+    est.plannedPerSenderPerHour,
+    Math.max(...input.senders.map((x) => x.cap)),
+  );
   const duration = (est.finishAtMs ?? 0) - (est.firstAtMs ?? 0);
 
   return (

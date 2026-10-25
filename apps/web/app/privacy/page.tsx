@@ -54,6 +54,13 @@ export default function PrivacyPage() {
             times and results of each send.
           </p>
           <p>
+            <strong className="text-ink">Gmail, if you connect it.</strong> The account&rsquo;s
+            address and name, and permission to send email as that account (Google&rsquo;s{' '}
+            <code className="text-body">gmail.send</code> scope). Cadence can&rsquo;t read, list, or
+            delete anything in your mailbox. Google gives us a token for that permission, which we
+            store encrypted.
+          </p>
+          <p>
             <strong className="text-ink">Slack, if you connect it.</strong> The workspace name,
             channel, and the access token Slack issues, stored encrypted, used only to post a
             message when a sender reaches its hourly limit.
@@ -62,15 +69,51 @@ export default function PrivacyPage() {
 
         <Section title="How email is handled">
           <p>
-            Every email is sent through Ethereal, a test mail service. Messages are captured there
-            for preview and are never delivered to the recipients you upload.
+            Cadence sends each email from the Gmail account you choose, to the recipients you
+            upload, at the times your campaign sets. Sent messages appear in that account&rsquo;s
+            Sent folder like any other email. Cadence never sends from an account you haven&rsquo;t
+            connected.
+          </p>
+        </Section>
+
+        <Section title="Google user data">
+          <p>
+            Cadence&rsquo;s use and transfer of information received from Google APIs adheres to the{' '}
+            <a
+              href="https://developers.google.com/terms/api-services-user-data-policy"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-signal underline-offset-4 hover:underline"
+            >
+              Google API Services User Data Policy
+            </a>
+            , including the Limited Use requirements.
+          </p>
+          <p>
+            We use your Google data only to sign you in and to send the campaigns you schedule. We
+            don&rsquo;t sell it, share it, use it for advertising, or use it to train AI models, and
+            nobody reads it unless you ask us to for support, or the law or a security investigation
+            requires it.
+          </p>
+          <p>
+            You can remove Cadence&rsquo;s access at any time by disconnecting the account in
+            Settings, which also revokes it at Google, or from your{' '}
+            <a
+              href="https://myaccount.google.com/permissions"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-signal underline-offset-4 hover:underline"
+            >
+              Google Account permissions
+            </a>
+            .
           </p>
         </Section>
 
         <Section title="Where it is stored">
           <p>
             Accounts and campaign data are stored in a Supabase Postgres database. A search index
-            and a job queue hold copies needed to search and send. Secrets such as Slack tokens are
+            and a job queue hold copies needed to search and send. Gmail and Slack tokens are
             encrypted at rest. Your data is visible only to your own account.
           </p>
         </Section>
@@ -92,7 +135,7 @@ export default function PrivacyPage() {
               {CONTACT}
             </a>{' '}
             from the address you signed in with, and we will delete your account and everything
-            attached to it. You can also disconnect Slack at any time from Settings.
+            attached to it. You can also disconnect Gmail and Slack at any time from Settings.
           </p>
         </Section>
 

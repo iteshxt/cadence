@@ -97,8 +97,8 @@ export function LoginPanel() {
                 className="mt-px size-4 shrink-0 text-signal"
               />
               <span>
-                This is a demo. Mail goes to Ethereal, a test inbox, and is never delivered to real
-                people.
+                Cadence only sends from Gmail accounts you connect in Settings. You can disconnect
+                them at any time.
               </span>
             </p>
           </div>

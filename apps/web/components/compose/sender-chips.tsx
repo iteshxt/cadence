@@ -2,8 +2,8 @@
 
 import type { SenderDto } from '@cadence/shared';
 import { Check } from 'lucide-react';
+import Link from 'next/link';
 import { cn } from '@/lib/cn';
-import { fmtNumber } from '@/lib/format';
 import { Skeleton } from '../ui/misc';
 
 /** Toggleable 32 px chips; selected ones in --signal-soft with a check (design.md §7.6). */
@@ -31,9 +31,24 @@ export function SenderChips({
   }
   if (!senders || senders.length === 0) {
     return (
-      <p className="text-body text-ink-2">
-        No sender accounts are set up yet. Run the seed script on the server.
-      </p>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-label text-ink">Send from</span>
+        <p className="rounded-control bg-sunken px-3 py-2.5 text-body text-ink-2">
+          Connect a Gmail account in{' '}
+          <Link
+            href="/dashboard/settings"
+            className="text-signal underline-offset-4 hover:underline"
+          >
+            Settings
+          </Link>{' '}
+          to send from it.
+        </p>
+        {error && (
+          <p role="alert" className="text-caption text-failed">
+            {error}
+          </p>
+        )}
+      </div>
     );
   }
   const toggle = (id: string) =>
@@ -73,8 +88,7 @@ export function SenderChips({
         </p>
       ) : (
         <p className="text-caption text-ink-3">
-          Shared Ethereal test mailboxes, each limited to {fmtNumber(senders[0]!.cap)} emails an
-          hour. Mail is captured for preview and never delivered. Hover a sender to see its address.
+          Your connected Gmail accounts. Each sends up to its own hourly limit, set in Settings.
         </p>
       )}
     </fieldset>

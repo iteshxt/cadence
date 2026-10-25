@@ -222,7 +222,11 @@ export function EmailTable(props: EmailTableProps) {
               <td className={`w-44 px-4 py-1.5 whitespace-nowrap ${collapseMd}`}>
                 <span>
                   {e.previewUrl && (
-                    <ExternalLink href={e.previewUrl}>View in Ethereal</ExternalLink>
+                    <ExternalLink href={e.previewUrl}>
+                      {e.previewUrl.startsWith('https://mail.google.com/')
+                        ? 'View in Gmail'
+                        : 'View'}
+                    </ExternalLink>
                   )}
                 </span>
               </td>

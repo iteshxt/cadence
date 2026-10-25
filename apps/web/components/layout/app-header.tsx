@@ -7,13 +7,11 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useStats } from '@/hooks/queries';
 import { cn } from '@/lib/cn';
-import { publicEnv } from '@/lib/env';
 import { fmtNumber } from '@/lib/format';
 import { getSupabase } from '@/lib/supabase/client';
 import { Logo } from '../brand/logo';
 import { useOpenCompose } from '../compose/compose-panel';
 import { Button } from '../ui/button';
-import { ExternalLink } from '../ui/misc';
 
 export interface HeaderUser {
   name: string | null;
@@ -183,14 +181,6 @@ function UserMenu({ user }: { user: HeaderUser }) {
             <Link href="/dashboard/settings">
               <Settings strokeWidth={1.5} aria-hidden /> Settings
             </Link>
-          </DropdownMenu.Item>
-          <DropdownMenu.Item asChild className={itemCls}>
-            <ExternalLink
-              href={`${publicEnv.apiUrl}/admin/queues`}
-              className="text-ink no-underline! hover:no-underline"
-            >
-              Queue dashboard
-            </ExternalLink>
           </DropdownMenu.Item>
           <DropdownMenu.Separator className="my-1 h-px bg-line" />
           <DropdownMenu.Item

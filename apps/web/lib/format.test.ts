@@ -37,6 +37,7 @@ describe('format', () => {
     expect(fmtInterval(36_000)).toBe('1 email every 36 seconds');
     expect(fmtInterval(1_000)).toBe('1 email every 1 second');
     expect(fmtInterval(120_000)).toBe('1 email every 2 minutes');
+    expect(fmtInterval(60_000)).toBe('1 email every 1 minute');
   });
 
   it('shows the zone with its offset', () => {

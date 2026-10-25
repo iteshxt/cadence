@@ -25,7 +25,7 @@ const steps = [
   },
   {
     title: 'Watch it send',
-    body: 'Every email goes out at its time, from your sender accounts in turn, within every limit.',
+    body: 'Every email goes out at its time, from your Gmail accounts in turn, within every limit.',
     visual: <SendVisual />,
   },
 ];
@@ -159,7 +159,7 @@ export default function LandingPage() {
                 <HeroActions className="mt-9 flex flex-wrap gap-3" />
               </div>
               <p style={rise(360)} className="mt-6 text-label text-ink-3 motion-safe:animate-rise">
-                Free demo. Mail goes to Ethereal, a test inbox, and is never delivered.
+                Free. Sends from your own Gmail, at the pace you set.
               </p>
             </div>
 
@@ -294,8 +294,8 @@ export default function LandingPage() {
               <div className="flex flex-col gap-3">
                 <Logo size="lg" />
                 <p className="max-w-[48ch] text-body text-ink-3">
-                  Built with Next.js, Express, BullMQ, Redis, Postgres, and Elasticsearch. Mail goes
-                  to Ethereal and is never delivered.
+                  Built with Next.js, Express, BullMQ, Redis, Postgres, and Elasticsearch. Sends
+                  through the Gmail API from the accounts you connect.
                 </p>
               </div>
               <nav

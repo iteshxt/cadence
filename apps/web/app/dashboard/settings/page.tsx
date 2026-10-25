@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { PageHead } from '@/components/layout/page-head';
 import {
+  DefaultsSection,
   LimitsSection,
-  QueueSection,
   SendersSection,
   SlackSection,
 } from '@/components/settings/settings-sections';
@@ -15,15 +15,17 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-[720px]">
       <PageHead
         title="Settings"
-        description="Slack alerts, your senders, and the limits the server enforces."
+        description="Your Gmail senders, Compose defaults, and Slack alerts."
         className="mb-10"
       />
       <Suspense>
+        <SendersSection />
+      </Suspense>
+      <DefaultsSection />
+      <Suspense>
         <SlackSection />
       </Suspense>
-      <SendersSection />
       <LimitsSection />
-      <QueueSection />
     </div>
   );
 }

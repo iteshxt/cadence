@@ -5,6 +5,7 @@ import {
   campaignIntervalMs,
   type CreateCampaignInput,
   type CreateCampaignResponse,
+  type UserSettings,
 } from '@cadence/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
@@ -21,7 +22,7 @@ import {
 } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
-import { useConfig, useSenders } from '@/hooks/queries';
+import { useConfig, useSenders, useSettings } from '@/hooks/queries';
 import { ApiError, api } from '@/lib/api';
 import {
   fmtDayTime,
@@ -50,7 +51,8 @@ interface FormValues {
   hourlyLimit: number;
 }
 
-function defaults(): FormValues {
+/** A fresh form, starting from the user's saved pacing defaults when they've loaded (SET-6). */
+function defaults(saved?: UserSettings): FormValues {
   const in10 = toLocalInputs(Date.now() + 10 * 60_000);
   return {
     subject: '',
@@ -58,8 +60,8 @@ function defaults(): FormValues {
     startDate: in10.date,
     startTime: in10.time,
     sendNow: false,
-    delaySeconds: LIMITS.DELAY_DEFAULT_SECONDS,
-    hourlyLimit: LIMITS.HOURLY_DEFAULT,
+    delaySeconds: saved?.defaultDelaySeconds ?? LIMITS.DELAY_DEFAULT_SECONDS,
+    hourlyLimit: saved?.defaultHourlyLimit ?? LIMITS.HOURLY_DEFAULT,
   };
 }
 
@@ -136,7 +138,13 @@ function ComposeForm({
   requestCloseRef: RefObject<() => void>;
 }) {
   const queryClient = useQueryClient();
-  const senders = useSenders();
+  const allSenders = useSenders();
+  const settings = useSettings();
+  // Only senders Google still accepts can send; "Reconnect needed" ones are left out (SET-5).
+  const usable = useMemo(
+    () => allSenders.data?.filter((s) => s.status === 'connected'),
+    [allSenders.data],
+  );
   const config = useConfig();
   const [idempotencyKey] = useState(() => crypto.randomUUID());
   const [recipients, setRecipients] = useState<RecipientsFile | null>(null);
@@ -145,18 +153,28 @@ function ComposeForm({
   const [senderError, setSenderError] = useState<string>();
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
-  const form = useForm<FormValues>({ defaultValues: defaults(), mode: 'onTouched' });
+  const form = useForm<FormValues>({ defaultValues: defaults(settings.data), mode: 'onTouched' });
   const { register, handleSubmit, setError, control, formState } = form;
   const values = useWatch({ control });
 
   // Default to every sender once they load.
   useEffect(() => {
-    if (senderIds === null && senders.data) setSenderIds(senders.data.map((s) => s.id));
-  }, [senders.data, senderIds]);
+    if (senderIds === null && usable) setSenderIds(usable.map((s) => s.id));
+  }, [usable, senderIds]);
+
+  // Defaults that arrive after the form opened fill the pacing fields the user hasn't touched.
+  const savedDefaults = settings.data;
+  useEffect(() => {
+    if (!savedDefaults) return;
+    if (!form.getFieldState('delaySeconds').isDirty)
+      form.resetField('delaySeconds', { defaultValue: savedDefaults.defaultDelaySeconds });
+    if (!form.getFieldState('hourlyLimit').isDirty)
+      form.resetField('hourlyLimit', { defaultValue: savedDefaults.defaultHourlyLimit });
+  }, [savedDefaults, form]);
 
   const chosen = useMemo(
-    () => (senders.data ?? []).filter((s) => senderIds?.includes(s.id)),
-    [senders.data, senderIds],
+    () => (usable ?? []).filter((s) => senderIds?.includes(s.id)),
+    [usable, senderIds],
   );
   const delay = Number(values.delaySeconds);
   const hourly = Number(values.hourlyLimit);
@@ -265,8 +283,7 @@ function ComposeForm({
       startAt: new Date(start).toISOString(),
       delaySeconds: Number(v.delaySeconds),
       hourlyLimit: Number(v.hourlyLimit),
-      senderIds:
-        senderIds && senders.data && senderIds.length < senders.data.length ? senderIds : undefined,
+      senderIds: senderIds && usable && senderIds.length < usable.length ? senderIds : undefined,
     });
   });
 
@@ -340,10 +357,10 @@ function ComposeForm({
             />
 
             <SenderChips
-              senders={senders.data}
+              senders={usable}
               selected={senderIds ?? []}
               onChange={(ids) => (setSenderIds(ids), setSenderError(undefined))}
-              loading={senders.isLoading}
+              loading={allSenders.isLoading}
               error={senderError}
             />
           </Group>

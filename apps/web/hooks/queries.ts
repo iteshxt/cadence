@@ -10,6 +10,7 @@ import type {
   SlackStatus,
   Stats,
   Timeline,
+  UserSettings,
 } from '@cadence/shared';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -26,6 +27,7 @@ export const queryKeys = {
   slack: ['slack'] as const,
   senders: ['senders'] as const,
   config: ['config'] as const,
+  settings: ['settings'] as const,
 };
 
 export function useEmails(view: EmailView, cursor: string | null) {
@@ -91,6 +93,15 @@ export function useConfig() {
     queryKey: queryKeys.config,
     queryFn: ({ signal }) => api<AppConfig>('/api/config', { signal }),
     staleTime: 5 * 60_000,
+  });
+}
+
+/** The user's Compose defaults (PRD SET-6). */
+export function useSettings() {
+  return useQuery({
+    queryKey: queryKeys.settings,
+    queryFn: ({ signal }) => api<UserSettings>('/api/settings', { signal }),
+    staleTime: 60_000,
   });
 }
 

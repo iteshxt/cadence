@@ -88,7 +88,7 @@ export function fmtInterval(ms: number) {
   if (s < 60)
     return `1 email every ${Number.isInteger(s) ? s : s.toFixed(1)} ${s === 1 ? 'second' : 'seconds'}`;
   const m = s / 60;
-  return `1 email every ${Number.isInteger(m) ? m : m.toFixed(1)} minutes`;
+  return `1 email every ${Number.isInteger(m) ? m : m.toFixed(1)} ${m === 1 ? 'minute' : 'minutes'}`;
 }
 
 /** The user's IANA zone and offset: "Asia/Kolkata, UTC+05:30". */
