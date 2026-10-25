@@ -2,13 +2,8 @@ import { eq } from 'drizzle-orm';
 import { SignJWT } from 'jose';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { senders, type SenderRow } from '../src/db/schema.js';
-import type {
-  GmailConnectError} from '../src/services/gmail.service.js';
-import {
-  createGmail,
-  GmailError,
-  type FetchFn,
-} from '../src/services/gmail.service.js';
+import type { GmailConnectError } from '../src/services/gmail.service.js';
+import { createGmail, GmailError, type FetchFn } from '../src/services/gmail.service.js';
 import { resetState, seedSenders, seedUser, testContext } from './helpers.js';
 
 const ctx = testContext({
