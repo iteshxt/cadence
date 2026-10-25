@@ -2,15 +2,18 @@
 
 import { HOUR_MS, LIMITS, type EmailView as View } from '@cadence/shared';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useEmails, useStats, useTimeline } from '@/hooks/queries';
 import { usePager } from '@/hooks/use-pager';
 import { fmtDayTime, fmtNumber, fmtTime } from '@/lib/format';
+import { PageHead } from '../layout/page-head';
 import { LiveStrip, type StripRange } from '../pace/live-strip';
 import { Readouts, type Readout } from '../pace/readouts';
 import { Button } from '../ui/button';
 import { Segmented } from '../ui/misc';
 import { EmailTable, EmptyState, type WindowUsage } from './email-table';
+
+const rise = (ms: number): CSSProperties => ({ animationDelay: `${ms}ms` });
 
 function useOpenCompose() {
   const router = useRouter();
@@ -92,57 +95,85 @@ export function EmailView({ view }: { view: View }) {
         ];
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-title text-ink">{view === 'scheduled' ? 'Scheduled' : 'Sent'}</h1>
-        {view === 'scheduled' && (
-          <Segmented
-            label="Time range"
-            value={range}
-            onChange={setRange}
-            options={[
-              { value: '3h', label: '3 h' },
-              { value: '12h', label: '12 h' },
-              { value: '24h', label: '24 h' },
-            ]}
-          />
-        )}
-      </div>
-
-      <LiveStrip
-        range={view === 'scheduled' ? range : '3h'}
-        mode={view === 'scheduled' ? 'upcoming' : 'recent'}
-      />
-      <Readouts items={readouts} loading={stats.isLoading} />
-
-      <EmailTable
-        view={view}
-        items={emails.data?.items}
-        total={emails.data?.total}
-        loading={emails.isLoading}
-        error={emails.error}
-        onRetry={() => emails.refetch()}
-        offset={pager.offset}
-        hasPrev={pager.hasPrev}
-        hasNext={Boolean(emails.data?.nextCursor)}
-        onPrev={pager.prev}
-        onNext={() => pager.next(emails.data?.nextCursor ?? null)}
-        usageFor={usageFor}
-        empty={
-          view === 'scheduled' ? (
-            <EmptyState
-              title="No emails scheduled"
-              body="Compose a campaign and its sends will appear here and on the strip above."
-              action={<Button onClick={openCompose}>Compose</Button>}
-            />
-          ) : (
-            <EmptyState
-              title="Nothing sent yet"
-              body="Sent and failed emails appear here once their time comes."
+    <div className="flex flex-col gap-8">
+      <PageHead
+        title={view === 'scheduled' ? 'Scheduled' : 'Sent'}
+        description={
+          view === 'scheduled'
+            ? 'Every email waiting to go out, on the minute it will send.'
+            : 'Everything that has gone out or failed, with when it happened.'
+        }
+        actions={
+          view === 'scheduled' && (
+            <Segmented
+              label="Time range"
+              value={range}
+              onChange={setRange}
+              options={[
+                { value: '3h', label: '3 h' },
+                { value: '12h', label: '12 h' },
+                { value: '24h', label: '24 h' },
+              ]}
             />
           )
         }
       />
+
+      {/* The strip floats on the same soft teal glow as the landing hero's queue. */}
+      <div style={rise(80)} className="relative motion-safe:animate-rise">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -inset-x-[6%] -inset-y-[40%] blur-3xl"
+          style={{
+            background:
+              'radial-gradient(closest-side, color-mix(in oklab, var(--signal) 26%, transparent), color-mix(in oklab, var(--signal) 10%, transparent) 60%, transparent)',
+          }}
+        />
+        <LiveStrip
+          range={view === 'scheduled' ? range : '3h'}
+          mode={view === 'scheduled' ? 'upcoming' : 'recent'}
+          className="relative p-5 shadow-float max-sm:p-4"
+        />
+      </div>
+
+      <Readouts
+        band
+        items={readouts}
+        loading={stats.isLoading}
+        style={rise(160)}
+        className="motion-safe:animate-rise"
+      />
+
+      <div style={rise(240)} className="motion-safe:animate-rise">
+        <EmailTable
+          view={view}
+          items={emails.data?.items}
+          total={emails.data?.total}
+          loading={emails.isLoading}
+          error={emails.error}
+          onRetry={() => emails.refetch()}
+          offset={pager.offset}
+          hasPrev={pager.hasPrev}
+          hasNext={Boolean(emails.data?.nextCursor)}
+          onPrev={pager.prev}
+          onNext={() => pager.next(emails.data?.nextCursor ?? null)}
+          usageFor={usageFor}
+          empty={
+            view === 'scheduled' ? (
+              <EmptyState
+                title="No emails scheduled"
+                body="Compose a campaign and its sends will appear here and on the strip above."
+                action={<Button onClick={openCompose}>Compose</Button>}
+              />
+            ) : (
+              <EmptyState
+                title="Nothing sent yet"
+                body="Sent and failed emails appear here once their time comes."
+              />
+            )
+          }
+        />
+      </div>
     </div>
   );
 }

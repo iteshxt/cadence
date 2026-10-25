@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
+import { PageHead } from '@/components/layout/page-head';
 import {
   LimitsSection,
   QueueSection,
@@ -12,7 +13,11 @@ export const metadata: Metadata = { title: 'Settings' };
 export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-[720px]">
-      <h1 className="mb-8 text-title text-ink">Settings</h1>
+      <PageHead
+        title="Settings"
+        description="Slack alerts, your senders, and the limits the server enforces."
+        className="mb-10"
+      />
       <Suspense>
         <SlackSection />
       </Suspense>

@@ -185,11 +185,11 @@ A label over a value, with no box around it. Used in a row under the pace strip 
 
 ### 7.4 Header and navigation
 
-- **Header:** 56 px, `--surface`, bottom hairline, sticky. The separate sub-navigation bar is gone.
-- **Left:** lockup, then the nav links Scheduled, Sent, and Settings. Scheduled and Sent show a count in `caption` tabular figures after the label ("Scheduled 1,240").
-- **Active link:** `--ink` text with a 2 px `--signal` underline on the header's bottom edge, which slides between links over 200 ms. Inactive links are `--ink-2`.
-- **Right:** search field (240 px, placeholder "Search emails", a `/` key hint), the **Compose** primary button, the avatar menu.
-- **Below 768 px:** the header row keeps the mark, a search icon button, a Compose icon button, and the avatar. The nav links move into a second 44 px row.
+- **Header:** fixed and sized like the landing header: 72 px on the canvas at the top, aligned to the 1200 px content width, with the large lockup. Once the page scrolls it contracts into the same floating bar as the landing header (64 px, 6 px radius, frosted `--surface` at 60% with a strong backdrop blur, `--shadow-float`) in one 500 ms ease-out transition. The separate sub-navigation bar is gone.
+- **Left:** lockup, then the nav links Scheduled, Sent, and Settings at `body-lg`. Scheduled and Sent show a count in `label` tabular figures after the label ("Scheduled 1,240").
+- **Active link:** a `--sunken` 6 px-radius fill with `--ink` text, the same treatment as the landing scrollspy. Inactive links are `--ink-2`.
+- **Right:** search field (256 px, 40 px tall, placeholder "Search emails", a `/` key hint), the 40 px **Compose** primary button, the avatar menu.
+- **Below 768 px:** the header row keeps the mark, a search icon button, a Compose icon button, and the avatar. The nav links sit in a second row inside the same bar.
 - `/` or ⌘K focuses search; Enter goes to `/dashboard/search?q=`.
 
 ### 7.5 Compose panel
@@ -316,6 +316,11 @@ A static, plain-language policy (Google requires its URL to publish the OAuth ap
 ```
 
 - **Compose** in the header is the only primary button on the page.
+- **Page head:** every dashboard page opens with a 36/42 title (28/34 on phones) and one line of context in `body-lg`/`--ink-2`, with the page's controls (the strip range) aligned to its bottom right.
+- **Color, with intent:** the pace strip is the page's one floating element: it gets `--shadow-float` and sits on the landing hero's soft `--signal` glow, toned down (26% at the center) so it never competes with status color.
+- **Readouts band:** the readouts sit in one `--surface` panel as equal columns divided by hairlines that fade out at both ends (the landing guarantees band), with values at 30/36. In Compose they stay a plain row.
+- **Empty states:** centered: the four ticks (three `--line`, the last `--signal`), a 19/28 title, one line of body, and a secondary action.
+- **Motion:** the page head, strip, readouts, and table rise in on load, 80 ms apart (the landing `rise`). Static under reduced motion.
 - The Sent page uses the same layout without the strip range control; its strip shows the last 3 hours, and the readouts are **Sent today**, **Sent in the last hour**, **Failed**.
 - Search (`/dashboard/search`) uses the same table without hour groups, sorted by relevance, with matches highlighted in `--signal-soft` and a status segmented control (All, Scheduled, Deferred, Sent, Failed).
 

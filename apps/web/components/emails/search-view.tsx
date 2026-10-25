@@ -8,6 +8,7 @@ import { usePager } from '@/hooks/use-pager';
 import { fmtNumber } from '@/lib/format';
 import { Input } from '../ui/input';
 import { Segmented } from '../ui/misc';
+import { PageHead } from '../layout/page-head';
 import { EmailTable, EmptyState } from './email-table';
 
 type Filter = 'all' | Extract<EmailStatus, 'scheduled' | 'deferred' | 'sent' | 'failed'>;
@@ -36,15 +37,19 @@ export function SearchView() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-title text-ink">Search</h1>
-        {q && results.data && (
-          <p className="text-body text-ink-2" aria-live="polite">
-            {fmtNumber(results.data.total)}{' '}
-            {results.data.total === 1 ? 'email matches' : 'emails match'} “{q}”
-          </p>
-        )}
-      </div>
+      <PageHead
+        title="Search"
+        description={
+          q && results.data ? (
+            <span aria-live="polite">
+              {fmtNumber(results.data.total)}{' '}
+              {results.data.total === 1 ? 'email matches' : 'emails match'} “{q}”
+            </span>
+          ) : (
+            'Find any email by recipient, subject, or message.'
+          )
+        }
+      />
 
       {/* The header field is hidden on small screens, so the page has its own. */}
       <form role="search" onSubmit={submit} className="md:hidden">

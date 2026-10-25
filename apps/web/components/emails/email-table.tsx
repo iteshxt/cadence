@@ -297,10 +297,15 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-start gap-1">
-      <p className="text-section text-ink">{title}</p>
-      <p className="text-body text-ink-2">{body}</p>
-      {action && <div className="mt-3">{action}</div>}
+    <div className="flex flex-col items-center gap-1 py-10 text-center">
+      <div aria-hidden className="mb-4 flex h-8 items-end gap-1.5">
+        {[0, 1, 2, 3].map((i) => (
+          <span key={i} className={cn('h-full w-1.5', i === 3 ? 'bg-signal' : 'bg-line')} />
+        ))}
+      </div>
+      <p className="text-[19px] leading-7 font-semibold text-ink">{title}</p>
+      <p className="max-w-[44ch] text-body-lg text-ink-2">{body}</p>
+      {action && <div className="mt-5">{action}</div>}
     </div>
   );
 }

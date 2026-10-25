@@ -53,7 +53,15 @@ export function toStripData(tl: Timeline) {
  * Dashboard pace strip. `mode="upcoming"` starts 15 minutes ago (Scheduled page);
  * `mode="recent"` shows the last few hours up to now (Sent page).
  */
-export function LiveStrip({ range, mode }: { range: StripRange; mode: 'upcoming' | 'recent' }) {
+export function LiveStrip({
+  range,
+  mode,
+  className,
+}: {
+  range: StripRange;
+  mode: 'upcoming' | 'recent';
+  className?: string;
+}) {
   const now = useNow();
   const minute = Math.floor(now / 60_000) * 60_000;
   const span = RANGE_MS[range];
@@ -79,6 +87,7 @@ export function LiveStrip({ range, mode }: { range: StripRange; mode: 'upcoming'
         to={1}
         summary="Loading the timeline."
         loading
+        className={className}
       />
     );
   }
@@ -114,6 +123,7 @@ export function LiveStrip({ range, mode }: { range: StripRange; mode: 'upcoming'
       now={now}
       summary={summary}
       loading={q.isLoading}
+      className={className}
     />
   );
 }
