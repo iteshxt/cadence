@@ -41,6 +41,19 @@ function useScenario() {
 
 const ease = (x: number) => 1 - (1 - x) ** 3;
 
+/** Phones get the regular strip size so labels and counters fit. */
+function useCompact() {
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)');
+    const update = () => setCompact(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+  return compact;
+}
+
 /**
  * Looping progress 0 → 1 that plays, holds, and plays again. Pauses while the board is off
  * screen or the tab is hidden, and stays on the final frame under reduced motion.
@@ -79,10 +92,10 @@ function useLoop(ref: RefObject<HTMLElement | null>) {
 function Counter({ label, value, tone }: { label: string; value: string; tone?: 'deferred' }) {
   return (
     <div className="min-w-0">
-      <dt className="truncate text-caption text-ink-3">{label}</dt>
+      <dt className="truncate text-label text-ink-3">{label}</dt>
       <dd
         className={cn(
-          'mt-0.5 truncate text-[22px] leading-7 font-semibold tabular [font-stretch:85%]',
+          'mt-1 truncate text-[30px] leading-9 font-semibold tabular [font-stretch:85%] max-sm:text-[22px] max-sm:leading-7',
           tone === 'deferred' ? 'text-deferred' : 'text-ink',
         )}
       >
@@ -101,6 +114,7 @@ export function HeroStrip() {
   const sends = useScenario();
   const boardRef = useRef<HTMLDivElement>(null);
   const progress = useLoop(boardRef);
+  const compact = useCompact();
 
   const simNow = FROM + progress * (TO - FROM);
   const slide = 0.12 * (TO - FROM);
@@ -153,17 +167,17 @@ export function HeroStrip() {
       ref={boardRef}
       className="min-w-0 rounded-panel border border-line bg-surface shadow-float"
     >
-      <div className="flex items-center justify-between gap-4 border-b border-line px-4 py-3">
+      <div className="flex items-center justify-between gap-4 border-b border-line px-6 py-4 max-sm:px-4">
         <div className="min-w-0">
-          <p className="truncate text-label font-semibold text-ink">Q4 outreach</p>
-          <p className="truncate text-caption text-ink-3">
+          <p className="truncate text-section text-ink">Q4 outreach</p>
+          <p className="truncate text-label text-ink-3">
             {TOTAL} emails, 3 senders, up to {CAP} per sender each hour
           </p>
         </div>
-        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-control bg-signal-soft px-2 py-1 text-caption font-medium text-signal">
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-signal-soft px-3 py-1.5 text-label text-signal">
           <span
             aria-hidden
-            className={cn('size-1.5 rounded-full bg-signal', playing && 'animate-pulse-slow')}
+            className={cn('size-2 rounded-full bg-signal', playing && 'animate-pulse-slow')}
           />
           {playing ? 'Sending' : 'Finished'}
         </span>
@@ -178,10 +192,11 @@ export function HeroStrip() {
         now={playing ? simNow : undefined}
         timeZone="UTC"
         summary="Example: 27 emails across three senders. Sender B reaches its hourly limit, and its remaining emails move to the next hour. Nothing is dropped."
-        className="rounded-none border-0"
+        className="rounded-none border-0 px-6 py-5 max-sm:px-4"
+        size={compact ? 'md' : 'lg'}
       />
 
-      <dl className="grid grid-cols-3 gap-4 border-t border-line px-4 py-3" aria-hidden>
+      <dl className="grid grid-cols-3 gap-4 border-t border-line px-6 py-4 max-sm:px-4" aria-hidden>
         <Counter label="Sent" value={`${fmtNumber(sent)} of ${TOTAL}`} />
         <Counter
           label="Moved to 3 PM"

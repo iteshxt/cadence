@@ -65,6 +65,8 @@
   --animate-pop-in: pop-in 150ms ease-out;
   --animate-fade-in: fade-in 200ms ease-out;
   --animate-fade-out: fade-out 150ms ease-in;
+  --animate-rise: rise 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-nudge: nudge 2.4s ease-in-out infinite;
 
   @keyframes flash {
     from {
@@ -127,6 +129,27 @@
     }
     to {
       opacity: 0;
+    }
+  }
+  /* Landing entrance: a short rise with no bounce (design.md §9). */
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  /* Scroll cue: a slow, small nudge downward. */
+  @keyframes nudge {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(4px);
     }
   }
 }
@@ -199,6 +222,13 @@
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
+    /* Anchor jumps land below the floating header. */
+    scroll-padding-top: 104px;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
   }
   body {
     background: var(--canvas);
