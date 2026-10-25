@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 import { cn } from '@/lib/cn';
 import { publicEnv } from '@/lib/env';
 import { Logo } from '../brand/logo';
@@ -46,6 +46,15 @@ export function LandingHeader() {
   const [scrolled, setScrolled] = useState(false);
   const active = useActiveSection(LINK_IDS);
 
+  // On the landing page the logo returns to the top instead of reloading it.
+  const toTop = (e: MouseEvent<HTMLAnchorElement>) => {
+    if (window.location.pathname !== '/') return;
+    e.preventDefault();
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({ top: 0, behavior: smooth ? 'smooth' : 'auto' });
+    if (window.location.hash) history.replaceState(null, '', '/');
+  };
+
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
     onScroll();
@@ -60,12 +69,17 @@ export function LandingHeader() {
           'pointer-events-auto mx-auto flex items-center gap-6',
           'motion-safe:transition-[max-width,height,margin,padding,border-radius,background-color,box-shadow] motion-safe:duration-500 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]',
           scrolled
-            ? 'mt-3 h-14 max-w-[820px] rounded-[28px] bg-surface/90 pr-2 pl-5 shadow-float backdrop-blur-md max-md:pl-4'
-            : 'mt-0 h-16 max-w-[1200px] rounded-none bg-transparent px-3 shadow-none max-md:px-1',
+            ? 'mt-3 h-16 max-w-[920px] rounded-[32px] bg-surface/90 pr-3 pl-6 shadow-float backdrop-blur-md max-md:pl-4'
+            : 'mt-0 h-20 max-w-[1280px] rounded-none bg-transparent px-3 shadow-none max-md:px-1',
         )}
       >
-        <Link href="/" aria-label="Cadence home" className="shrink-0 rounded-control">
-          <Logo />
+        <Link
+          href="/"
+          aria-label="Cadence, back to top"
+          onClick={toTop}
+          className="shrink-0 rounded-control"
+        >
+          <Logo size="lg" />
         </Link>
         <nav aria-label="Page" className="flex items-center gap-1 max-md:hidden">
           {links.map((l) => (
@@ -74,7 +88,7 @@ export function LandingHeader() {
               href={`#${l.id}`}
               aria-current={active === l.id ? 'true' : undefined}
               className={cn(
-                'rounded-full px-3 py-1.5 text-body transition-colors duration-200',
+                'rounded-full px-4 py-2 text-body-lg transition-colors duration-200',
                 active === l.id ? 'bg-sunken text-ink' : 'text-ink-2 hover:text-ink',
               )}
             >
@@ -82,24 +96,19 @@ export function LandingHeader() {
             </a>
           ))}
         </nav>
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex items-center gap-2">
           <Button
             asChild
             variant="ghost"
             size="icon"
             aria-label="Cadence on GitHub"
-            className="rounded-full"
+            className="size-10 rounded-full"
           >
             <a href={publicEnv.githubUrl} target="_blank" rel="noreferrer noopener">
-              <GitHubMark className="size-[18px]" />
+              <GitHubMark className="size-5" />
             </a>
           </Button>
-          <Button
-            asChild
-            variant="secondary"
-            size="sm"
-            className={cn('transition-[border-radius] duration-500', scrolled && 'rounded-full')}
-          >
+          <Button asChild variant="secondary" className="h-10 px-5 text-body-lg">
             <Link href="/login">Sign in</Link>
           </Button>
         </div>
