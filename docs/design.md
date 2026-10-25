@@ -281,9 +281,13 @@ Minimal and calm: one task on the page.
 
 - **Top bar** (80 px, no background): the large lockup on the left, linking home, and a ghost **Back to home** button with a left arrow on the right.
 - **Panel:** centered, 440 px wide, 40 px padding (28 px on phones), 10 px radius, hairline border, `--shadow-float`, floating on the same soft teal glow as the landing hero. Inside: "Sign in to Cadence" (30/36, 600), one line of body in `--ink-2` ("Schedule campaigns and watch them send at your pace."), an error banner when the OAuth `error` parameter is present, a full-width 48 px Google button, and a `--sunken` note with a `--signal` shield icon: "This is a demo. Mail goes to Ethereal, a test inbox, and is never delivered to real people."
-- **Below the panel:** one centered caption about data use ("We only use your Google name, email, and photo to sign you in.").
+- **Below the panel:** one centered caption about data use ("We only use your Google name, email, and photo to sign you in."), followed by a **Privacy policy** link.
 - **Footer:** "Cadence" on the left and a GitHub link on the right, in `label`/`--ink-3`.
 - **Motion:** the panel rises in on load (the landing `rise` animation); the caption follows 150 ms later. Static under reduced motion.
+
+### 8.2.1 Privacy (`/privacy`)
+
+A static, plain-language policy (Google requires its URL to publish the OAuth app). The lockup top-left linking home, then a 720 px reading column: the page title (36/42, 600), a "Last updated" line in `label`/`--ink-3`, and short `section`-titled blocks in `body-lg`/`--ink-2`. Links to it sit in the landing footer and under the sign-in panel.
 
 ### 8.3 Dashboard
 

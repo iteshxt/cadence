@@ -107,7 +107,10 @@ export function LoginPanel() {
             style={rise(150)}
             className="relative mt-6 text-center text-caption text-ink-3 motion-safe:animate-rise"
           >
-            We only use your Google name, email, and photo to sign you in.
+            We only use your Google name, email, and photo to sign you in.{' '}
+            <Link href="/privacy" className="underline-offset-4 hover:text-ink hover:underline">
+              Privacy policy
+            </Link>
           </p>
         </div>
       </main>

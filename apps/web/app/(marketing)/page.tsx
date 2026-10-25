@@ -311,6 +311,9 @@ export default function LandingPage() {
                 <Link href="/login" className="text-ink-2 transition-colors hover:text-ink">
                   Sign in
                 </Link>
+                <Link href="/privacy" className="text-ink-2 transition-colors hover:text-ink">
+                  Privacy
+                </Link>
                 <a
                   href={publicEnv.githubUrl}
                   target="_blank"
