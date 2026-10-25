@@ -1,11 +1,11 @@
 'use client';
 
 import { HOUR_MS, LIMITS, type EmailView as View } from '@cadence/shared';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useEmails, useStats, useTimeline } from '@/hooks/queries';
 import { usePager } from '@/hooks/use-pager';
 import { fmtDayTime, fmtNumber, fmtTime } from '@/lib/format';
+import { useOpenCompose } from '../compose/compose-panel';
 import { PageHead } from '../layout/page-head';
 import { LiveStrip, type StripRange } from '../pace/live-strip';
 import { Readouts, type Readout } from '../pace/readouts';
@@ -14,17 +14,6 @@ import { Segmented } from '../ui/misc';
 import { EmailTable, EmptyState, type WindowUsage } from './email-table';
 
 const rise = (ms: number): CSSProperties => ({ animationDelay: `${ms}ms` });
-
-function useOpenCompose() {
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
-  return () => {
-    const next = new URLSearchParams(params.toString());
-    next.set('compose', '1');
-    router.push(`${pathname}?${next}`, { scroll: false });
-  };
-}
 
 /** Per-sender usage for the hour groups, from the same timeline the strip shows. */
 function useWindowUsage(enabled: boolean) {

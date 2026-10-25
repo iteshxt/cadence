@@ -25,10 +25,12 @@ export function RecipientsDropzone({
   value,
   onChange,
   error,
+  label = 'Recipients',
 }: {
   value: RecipientsFile | null;
   onChange: (v: RecipientsFile | null) => void;
   error?: string;
+  label?: string;
 }) {
   const id = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -67,7 +69,7 @@ export function RecipientsDropzone({
   return (
     <div className="flex flex-col gap-1.5">
       <span id={`${id}-label`} className="text-label text-ink">
-        Recipients
+        {label}
       </span>
       {value ? (
         <div className="flex flex-col gap-2">

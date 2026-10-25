@@ -7,15 +7,24 @@ import {
   type CreateCampaignResponse,
 } from '@cadence/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { X } from 'lucide-react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Timer, X } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import { Dialog } from 'radix-ui';
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import {
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 import { useConfig, useSenders } from '@/hooks/queries';
 import { ApiError, api } from '@/lib/api';
 import {
+  fmtDayTime,
   fmtInterval,
   fmtNumber,
   fmtTime,
@@ -54,34 +63,87 @@ function defaults(): FormValues {
   };
 }
 
+/**
+ * Opens Compose by adding `?compose=1`. The history API updates `useSearchParams` without the
+ * server round trip a router navigation makes, so the panel opens immediately.
+ */
+export function useOpenCompose() {
+  return () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('compose', '1');
+    window.history.pushState(null, '', url);
+  };
+}
+
 /** Opens over any dashboard page when the URL has `?compose=1` (design.md §7.5). */
 export function ComposePanel() {
-  const params = useSearchParams();
-  const pathname = usePathname();
-  const router = useRouter();
-  const open = params.get('compose') === '1';
-  // A new key per opening resets the form and generates a new Idempotency-Key.
+  const urlOpen = useSearchParams().get('compose') === '1';
+  // Local state closes the panel on the click itself; the URL catches up after.
+  const [open, setOpen] = useState(urlOpen);
+  // A new key per opening resets the form and generates a new Idempotency-Key. It changes on
+  // open, not on close, so the panel keeps its content while it slides out.
   const [session, setSession] = useState(0);
 
+  useEffect(() => {
+    setOpen(urlOpen);
+    if (urlOpen) setSession((s) => s + 1);
+  }, [urlOpen]);
+
   const close = () => {
-    const next = new URLSearchParams(params.toString());
-    next.delete('compose');
-    const qs = next.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-    setSession((s) => s + 1);
+    setOpen(false);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('compose');
+    window.history.replaceState(null, '', url);
   };
 
+  // Escape and outside clicks go through the form, which asks before discarding changes.
+  const requestClose = useRef(close);
+
+  // Overlay and Content must be the Portal's direct children: Radix waits for their exit
+  // animations only when it can see their DOM nodes.
   return (
     <Dialog.Root open={open}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-[rgb(15_18_17/0.4)] data-[state=closed]:animate-fade-out data-[state=open]:animate-fade-in" />
-        {open && <ComposeForm key={session} onClose={close} />}
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-[rgb(15_18_17/0.4)] motion-safe:data-[state=closed]:animate-fade-out motion-safe:data-[state=open]:animate-fade-in" />
+        <Dialog.Content
+          onEscapeKeyDown={(ev) => (ev.preventDefault(), requestClose.current())}
+          onPointerDownOutside={(ev) => (ev.preventDefault(), requestClose.current())}
+          onInteractOutside={(ev) => ev.preventDefault()}
+          aria-describedby={undefined}
+          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[920px] flex-col bg-surface shadow-float outline-none will-change-transform motion-safe:data-[state=closed]:animate-panel-out motion-safe:data-[state=open]:animate-panel-in"
+        >
+          <ComposeForm key={session} onClose={close} requestCloseRef={requestClose} />
+        </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
   );
 }
 
-function ComposeForm({ onClose }: { onClose: () => void }) {
+/** A numbered group of fields, like the landing page's campaign steps. */
+function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-5 border-t border-line pt-6 first:border-t-0 first:pt-0">
+      <h3 className="flex items-center gap-3 text-section text-ink">
+        <span
+          aria-hidden
+          className="flex size-7 items-center justify-center rounded-control bg-signal-soft text-label text-signal tabular"
+        >
+          {n}
+        </span>
+        {title}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+function ComposeForm({
+  onClose,
+  requestCloseRef,
+}: {
+  onClose: () => void;
+  requestCloseRef: RefObject<() => void>;
+}) {
   const queryClient = useQueryClient();
   const senders = useSenders();
   const config = useConfig();
@@ -141,6 +203,9 @@ function ComposeForm({ onClose }: { onClose: () => void }) {
 
   const dirty = formState.isDirty || recipients !== null;
   const requestClose = () => (dirty ? setConfirmDiscard(true) : onClose());
+  useEffect(() => {
+    requestCloseRef.current = requestClose;
+  });
 
   const mutation = useMutation({
     mutationFn: (body: CreateCampaignInput) =>
@@ -219,30 +284,39 @@ function ComposeForm({ onClose }: { onClose: () => void }) {
   const count = recipients?.emails.length ?? 0;
 
   return (
-    <Dialog.Content
-      onEscapeKeyDown={(ev) => (ev.preventDefault(), requestClose())}
-      onPointerDownOutside={(ev) => (ev.preventDefault(), requestClose())}
-      onInteractOutside={(ev) => ev.preventDefault()}
-      aria-describedby={undefined}
-      className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[880px] flex-col bg-surface shadow-float outline-none data-[state=open]:animate-panel-in"
-    >
-      <form onSubmit={onSubmit} noValidate className="flex min-h-0 flex-1 flex-col">
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-line px-6 max-md:px-4">
-          <Dialog.Title className="text-title text-ink">New campaign</Dialog.Title>
-          <Button variant="ghost" size="icon" aria-label="Close" onClick={requestClose}>
-            <X strokeWidth={1.5} />
-          </Button>
+    <form onSubmit={onSubmit} noValidate className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-8 py-5 max-md:px-4 max-md:py-4">
+        <div className="min-w-0">
+          <Dialog.Title className="text-[26px] leading-8 font-semibold tracking-[-0.02em] text-ink">
+            New campaign
+          </Dialog.Title>
+          <p className="mt-1 text-body-lg text-ink-2">
+            Write it once, choose the pace, and check the plan before it starts.
+          </p>
         </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Close"
+          onClick={requestClose}
+          className="-mr-2 size-10"
+        >
+          <X strokeWidth={1.5} className="size-5!" />
+        </Button>
+      </div>
 
-        <div className="grid min-h-0 flex-1 overflow-y-auto md:grid-cols-[minmax(0,1fr)_380px] md:overflow-hidden">
-          {/* Form */}
-          <div className="flex flex-col gap-5 p-6 max-md:p-4 md:overflow-y-auto">
+      <div className="grid min-h-0 flex-1 overflow-y-auto md:grid-cols-[minmax(0,1fr)_380px] md:overflow-hidden">
+        {/* Form */}
+        <div className="flex flex-col gap-6 px-8 py-7 max-md:px-4 max-md:py-5 md:overflow-y-auto">
+          <Step n={1} title="Message">
             <Field id="subject" label="Subject" error={e.subject?.message} required>
               <Input
                 id="subject"
                 autoFocus
                 autoComplete="off"
                 maxLength={LIMITS.SUBJECT_MAX}
+                placeholder="Quick question about Q4"
+                className="h-10 text-body-lg"
                 {...describedBy('subject', e.subject?.message)}
                 {...register('subject', {
                   validate: (v) => (v.trim() ? true : 'Subject is required'),
@@ -267,7 +341,8 @@ function ComposeForm({ onClose }: { onClose: () => void }) {
             >
               <Textarea
                 id="body"
-                rows={8}
+                rows={7}
+                className="text-body-lg leading-6"
                 {...describedBy('body', e.body?.message, true)}
                 {...register('body', {
                   validate: (v) => (v.trim() ? true : 'Message is required'),
@@ -278,8 +353,11 @@ function ComposeForm({ onClose }: { onClose: () => void }) {
                 })}
               />
             </Field>
+          </Step>
 
+          <Step n={2} title="Recipients">
             <RecipientsDropzone
+              label="List"
               value={recipients}
               onChange={(v) => (setRecipients(v), setRecipientsError(undefined))}
               error={recipientsError}
@@ -292,14 +370,16 @@ function ComposeForm({ onClose }: { onClose: () => void }) {
               loading={senders.isLoading}
               error={senderError}
             />
+          </Step>
 
+          <Step n={3} title="Pace">
             <fieldset className="flex flex-col gap-1.5">
               <legend className="mb-1.5 text-label text-ink">Start</legend>
               <div className="flex flex-wrap items-center gap-3">
                 <Input
                   type="date"
                   aria-label="Start date"
-                  className="w-40"
+                  className="h-10 w-40"
                   disabled={values.sendNow}
                   {...describedBy('startTime', e.startTime?.message, true)}
                   {...register('startDate')}
@@ -307,7 +387,7 @@ function ComposeForm({ onClose }: { onClose: () => void }) {
                 <Input
                   type="time"
                   aria-label="Start time"
-                  className="w-32"
+                  className="h-10 w-32"
                   disabled={values.sendNow}
                   {...describedBy('startTime', e.startTime?.message, true)}
                   {...register('startTime')}
@@ -338,6 +418,7 @@ function ComposeForm({ onClose }: { onClose: () => void }) {
                   min={LIMITS.DELAY_MIN_SECONDS}
                   max={LIMITS.DELAY_MAX_SECONDS}
                   step={1}
+                  className="h-10"
                   {...describedBy('delaySeconds', e.delaySeconds?.message)}
                   {...register('delaySeconds', {
                     valueAsNumber: true,
@@ -354,6 +435,7 @@ function ComposeForm({ onClose }: { onClose: () => void }) {
                   min={LIMITS.HOURLY_MIN}
                   max={LIMITS.HOURLY_MAX}
                   step={1}
+                  className="h-10"
                   {...describedBy('hourlyLimit', e.hourlyLimit?.message)}
                   {...register('hourlyLimit', {
                     valueAsNumber: true,
@@ -365,57 +447,79 @@ function ComposeForm({ onClose }: { onClose: () => void }) {
               </Field>
             </div>
             {intervalMs && (
-              <p className="-mt-2 text-caption text-ink-3">{fmtInterval(intervalMs)}</p>
+              <p className="flex items-center gap-2 rounded-control bg-sunken px-3 py-2.5 text-label text-ink-2">
+                <Timer aria-hidden strokeWidth={1.5} className="size-4 shrink-0 text-signal" />
+                {fmtInterval(intervalMs)}
+              </p>
             )}
-          </div>
+          </Step>
+        </div>
 
-          {/* Preview: sticky beside the form on desktop, a collapsible summary on mobile. */}
-          <aside
-            aria-label="Preview"
-            className="border-line bg-canvas p-6 max-md:border-t max-md:p-4 md:overflow-y-auto md:border-l"
-          >
-            <details className="md:hidden" open={false}>
-              <summary className="cursor-pointer text-label text-ink">Preview</summary>
-              <div className="mt-4">
-                <ComposePreview estimate={estimate} />
-              </div>
-            </details>
-            <div className="max-md:hidden">
-              <h2 className="mb-4 text-label text-ink-2">Preview</h2>
+        {/* Preview: sticky beside the form on desktop, a collapsible summary on mobile. */}
+        <aside
+          aria-label="Preview"
+          className="border-line bg-canvas px-6 py-7 max-md:border-t max-md:p-4 md:overflow-y-auto md:border-l"
+        >
+          <details className="md:hidden" open={false}>
+            <summary className="cursor-pointer text-section text-ink">Preview</summary>
+            <div className="mt-4">
               <ComposePreview estimate={estimate} />
             </div>
-          </aside>
-        </div>
+          </details>
+          <div className="max-md:hidden">
+            <h2 className="text-section text-ink">Preview</h2>
+            <p className="mt-1 mb-5 text-label text-ink-3">
+              Planned with the same limits the worker enforces.
+            </p>
+            <ComposePreview estimate={estimate} />
+          </div>
+        </aside>
+      </div>
 
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line px-6 py-3 max-md:px-4">
-          {confirmDiscard ? (
-            <div
-              role="alertdialog"
-              aria-label="Discard this campaign?"
-              className="flex w-full flex-wrap items-center justify-end gap-2"
+      <div className="flex shrink-0 items-center justify-end gap-3 border-t border-line px-8 py-4 max-md:px-4 max-md:py-3">
+        {confirmDiscard ? (
+          <div
+            role="alertdialog"
+            aria-label="Discard this campaign?"
+            className="flex w-full flex-wrap items-center justify-end gap-2"
+          >
+            <p className="mr-auto text-body-lg text-ink">Discard this campaign?</p>
+            <Button
+              variant="ghost"
+              className="h-10"
+              onClick={() => setConfirmDiscard(false)}
+              autoFocus
             >
-              <p className="mr-auto text-body text-ink">Discard this campaign?</p>
-              <Button variant="ghost" onClick={() => setConfirmDiscard(false)} autoFocus>
-                Keep editing
-              </Button>
-              <Button variant="destructive" onClick={onClose}>
-                Discard
-              </Button>
-            </div>
-          ) : (
-            <>
-              <Button variant="ghost" onClick={requestClose}>
-                Cancel
-              </Button>
-              <Button type="submit" variant="primary" loading={mutation.isPending}>
-                {count > 0
-                  ? `Schedule ${fmtNumber(count)} ${count === 1 ? 'email' : 'emails'}`
-                  : 'Schedule'}
-              </Button>
-            </>
-          )}
-        </div>
-      </form>
-    </Dialog.Content>
+              Keep editing
+            </Button>
+            <Button variant="destructive" className="h-10" onClick={onClose}>
+              Discard
+            </Button>
+          </div>
+        ) : (
+          <>
+            {estimate?.est.finishAtMs && (
+              <p className="mr-auto text-label text-ink-2 max-sm:hidden">
+                Finishes around{' '}
+                <span className="text-ink tabular">{fmtDayTime(estimate.est.finishAtMs)}</span>
+              </p>
+            )}
+            <Button variant="ghost" className="h-10 px-4 text-body-lg" onClick={requestClose}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              className="h-10 px-5 text-body-lg"
+              loading={mutation.isPending}
+            >
+              {count > 0
+                ? `Schedule ${fmtNumber(count)} ${count === 1 ? 'email' : 'emails'}`
+                : 'Schedule'}
+            </Button>
+          </>
+        )}
+      </div>
+    </form>
   );
 }

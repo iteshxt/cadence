@@ -11,6 +11,7 @@ import { publicEnv } from '@/lib/env';
 import { fmtNumber } from '@/lib/format';
 import { getSupabase } from '@/lib/supabase/client';
 import { Logo } from '../brand/logo';
+import { useOpenCompose } from '../compose/compose-panel';
 import { Button } from '../ui/button';
 import { ExternalLink } from '../ui/misc';
 
@@ -18,17 +19,6 @@ export interface HeaderUser {
   name: string | null;
   email: string;
   avatarUrl: string | null;
-}
-
-function useOpenCompose() {
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
-  return () => {
-    const next = new URLSearchParams(params.toString());
-    next.set('compose', '1');
-    router.push(`${pathname}?${next}`, { scroll: false });
-  };
 }
 
 function NavLinks({ className }: { className?: string }) {

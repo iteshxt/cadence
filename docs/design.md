@@ -196,14 +196,15 @@ A label over a value, with no box around it. Used in a row under the pace strip 
 
 Replaces the earlier 640 px modal. Opened by the Compose button or `?compose=1`.
 
-- **Desktop:** an 880 px panel sliding in from the right, full height, `--shadow-float`, 0 px radius on the right edge. The page behind gets an `rgb(15 18 17 / 0.4)` overlay with no blur.
-- **Header:** "New campaign" (`title`) and a close button.
+- **Opening and closing:** the panel's open state is local and the URL follows it through the history API (`pushState` on open, `replaceState` on close), so neither waits on a server round trip. The browser's Back button closes it. The form resets each time the panel opens, never while it is closing, so it keeps its content as it slides out.
+- **Desktop:** a 920 px panel sliding in from the right edge, full height, `--shadow-float`, 0 px radius on the right edge. The page behind gets an `rgb(15 18 17 / 0.4)` overlay with no blur.
+- **Header:** "New campaign" (26/32, 600), one line of context in `body-lg`/`--ink-2` ("Write it once, choose the pace, and check the plan before it starts."), and a 40 px close button.
 - **Body:** two columns.
-  - **Left (form, scrolls):** Subject; Message (textarea, 8 rows, character count); Recipients (dropzone); Send from (sender chips); Start (date, time, and a "Send now" switch); Delay between emails; Hourly limit. 20 px between field groups.
-  - **Right (preview, sticky, `--canvas` background):** the pace strip with the planned campaign, readouts **First send**, **Finishes around**, **Per sender each hour**, the capacity warning when it applies, and the first 5 recipients.
-- **Footer (sticky, top hairline):** Cancel (ghost) and "Schedule 1,240 emails" (primary).
-- **Below 768 px:** full-screen sheet. The preview collapses into a summary block above the footer ("Finishes around 6:42 PM"), which expands on tap.
-- Escape closes it, asking for confirmation if the form has changes. Focus is trapped while open and returns to the Compose button on close.
+  - **Left (form, scrolls):** three numbered steps, like the landing page's campaign steps: a `--signal-soft` number badge and a `section` title, separated by hairlines. **1 Message:** Subject (with a placeholder) and Message (7 rows, character count). **2 Recipients:** the dropzone (labelled "List") and Send from (sender chips). **3 Pace:** Start (date, time, and a "Send now" switch), Delay between emails, Hourly limit, and the computed interval in a `--sunken` note with a `--signal` timer icon. Fields are 40 px.
+  - **Right (preview, sticky, `--canvas` background):** a "Preview" `section` title with the caption "Planned with the same limits the worker enforces.", then the pace strip with the planned campaign (`--shadow-float`), readouts **First send**, **Finishes around**, **Per sender each hour**, and the capacity warning when it applies. Before recipients are added: a dashed box with the four ticks and "Add recipients to see when each email will go out."
+- **Footer (sticky, top hairline):** "Finishes around 6:42 PM" on the left once there is a plan, then Cancel (ghost) and "Schedule 1,240 emails" (primary), both 40 px.
+- **Below 768 px:** full-screen sheet. The preview collapses into a summary block above the footer, which expands on tap.
+- Escape or a click outside closes it, asking for confirmation in the footer if the form has changes. Focus is trapped while open and returns to the Compose button on close.
 
 ### 7.6 Form controls
 
@@ -215,7 +216,7 @@ Replaces the earlier 640 px modal. Opened by the Compose button or `?compose=1`.
 | **Number field** | Input with a suffix unit in `--ink-3` ("seconds", "emails per hour"). Arrow keys step the value. The pacing fields share one helper caption that states the result ("1 email every 36 seconds"). When the plan exceeds what the senders can send, a second caption in `--deferred`: "Your senders can send 600 emails an hour in total. The rest will move to the next hour." |
 | **Date and time** | Native date and time inputs (the browser's own picker, which is accessible and familiar on every platform), with the timezone as a caption ("Asia/Kolkata, UTC+05:30"). Disabled while **Send now** is on. |
 | **Dropzone** | 120 px, dashed 1 px `--control` border, 10 px radius, upload icon, "Drop a CSV or TXT file, or browse", caption "Up to 2 MB and 5,000 recipients". Drag-over: `--signal` border, `--signal-soft` fill. Once parsed: a file chip (icon, name, size, remove button) and a result line: "1,240 emails ready" in `--ink` weight 600, then "Removed 12 duplicates and 3 invalid addresses" in `--ink-3`. Results are announced with `aria-live="polite"`. |
-| **Sender chips** | 32 px toggles, 6 px radius, 1 px `--control` border. Selected: `--signal-soft` fill, `--signal` text, check icon. |
+| **Sender chips** | 36 px toggles in `body`, 6 px radius, 1 px `--control` border. Selected: `--signal-soft` fill, `--signal` text, check icon. |
 | **Switch** | 20 × 36 px track, `--control` off, `--signal` on. |
 | **Segmented control** | Used for the strip range and search status filter. 32 px, `--sunken` track, selected segment `--surface` with a hairline. |
 
@@ -337,9 +338,9 @@ A single column, max width 720 px. Sections are separated by `section` headings 
 
 | Interaction | Animation |
 |---|---|
-| Compose panel | Slides in from the right, 200 ms ease-out (exit 150 ms); overlay fades |
+| Compose panel | Slides fully in from the right edge, 360 ms on the landing curve; slides back out in 220 ms ease-in while the overlay fades over the same 220 ms. Under reduced motion it appears and disappears without movement |
 | Menus and popovers | Fade plus translateY 4 px → 0, 150 ms |
-| Header underline | Slides between links, 200 ms ease-out |
+| Header bar | Contracts into the frosted floating bar on scroll, 500 ms on the landing curve |
 | Pace strip ticks | Color changes over 150 ms as status changes; the now-line advances smoothly between polls |
 | Sending mark | 2 s opacity pulse, 1 → 0.5 |
 | New table rows (polling) | `--signal-soft` background fading to transparent over 1.2 s |
