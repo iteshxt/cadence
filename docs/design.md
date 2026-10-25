@@ -262,12 +262,16 @@ Left-aligned throughout, no centered stack. The page alternates `--canvas` and `
 └ footer (--canvas): lockup, tech line, links ─────────────────────────────────────────┘
 ```
 
-- **Header:** sticky; transparent over the hero, `--surface` with a bottom hairline once the page scrolls. Section anchors on desktop, a GitHub icon button, and **Sign in** as a small secondary button.
+- **Header:** fixed and generously sized: 80 px tall at the top with the large lockup (24 px mark, 21 px wordmark), section links at 16 px, a 40 px GitHub icon button, and a 40 px **Sign in** secondary button that keeps its normal 6 px radius in both states. Once the page scrolls, the header contracts into a floating pill (max 920 px, 64 px tall, 32 px radius, `--surface` at 90% with a light backdrop blur, `--shadow-float`) in one 500 ms ease-out transition. Section links highlight the section in view with a `--sunken` pill. On the landing page the logo scrolls smoothly back to the top (and clears the URL hash) instead of reloading.
+- **Viewport sections:** the hero, How a campaign runs, and What happens when… each fill at least one screen (`min-height: 100svh`) with their content centered vertically; the closing call to action shares the last screen with the footer. Content can still grow past a screen on small viewports.
+- **Scale:** the landing page uses a larger scale than the app: hero headline 60/64 (52 on tablets, 38 on phones), hero body 19/32, section titles 40/46, step titles 21/28, body 17/28, and 48 px hero buttons. Content width is 1280 px.
+- **Color, with intent:** the live board sits on a `--signal-soft` "stage" (a solid rounded block offset behind it, not a gradient); the guarantees band's figures are `--signal`; step numbers sit in `--signal-soft` badges; reliability proofs are chips tinted with their status's soft color (deferred, failed) or `--sunken`; and the closing call to action is a full `--signal` band with `--signal-fg` text.
+- **Guarantees band:** anchors the bottom of the hero screen: four facts that are enforced or measured (sent once, about 50 ms from planned time to dispatch, 5,000 recipients, zero cron jobs), with a narrow tabular `--signal` figure over a one-line caption.
 - **Live board:** the one showcased, floating element on the page, so it is the only resting element allowed `--shadow-float`. A header row (campaign name and a `--signal-soft` status chip, "Sending" or "Finished"), the pace strip, and three counters (Sent, Moved to the next hour, Next send) that update with the strip.
 - **The one orchestrated moment, on a loop:** the board plays a scripted campaign over about 7 seconds (ticks fill in, Sender B reaches its cap, its remaining ticks slide into the next hour), holds the finished state for about 2.5 seconds, and plays again. It pauses while off screen or while the tab is hidden. Under reduced motion it shows the finished state, still.
 - **How a campaign runs:** each step pairs a small, static piece of the real interface (file chip and result line, pacing fields with the computed interval, timetable rows with status marks) with a numbered title and one sentence. The steps are a real sequence, so they are numbered; the numerals are `--signal`.
 - **What happens when…:** one panel of hairline-separated rows: the situation in `section` style, the outcome in `body-lg`/`--ink-2`, and a proof cell with a status mark and a caption ("Sent, 1 attempt"). These are the PRD's acceptance criteria, written for users.
-- **Closing call to action:** one line of title, one line of body, and the same two hero buttons.
+- **Closing call to action:** a full-width `--signal` band, centered: the brand's four ticks at display size (three in `--signal-fg` at 45%, the last in full `--signal-fg`), a 56 px title, one line of body, and the same two hero buttons (GitHub turns `--signal-fg` on the band).
 - **No** product screenshot, glow, dot grid, feature-card grid, eyebrow labels, or separate tech strip section.
 - Sections have 96 px of vertical padding (64 px on mobile).
 
@@ -325,8 +329,15 @@ A single column, max width 720 px. Sections are separated by `section` headings 
 | Sending mark | 2 s opacity pulse, 1 → 0.5 |
 | New table rows (polling) | `--signal-soft` background fading to transparent over 1.2 s |
 | Status change | Glyph and label crossfade, 150 ms |
-| Landing strip | The single orchestrated sequence (§8.1), once per page load |
-| Reduced motion | Everything above is instant; the sending pulse and landing sequence are static |
+| **Landing:** hero entrance | The page's one load-time sequence: headline, body, buttons, note, and board rise 14 px and fade in, staggered 0–360 ms, 700 ms each on `cubic-bezier(0.22, 1, 0.36, 1)` |
+| **Landing:** live board | The scripted campaign loops (about 7 s, then a 2.5 s hold); paused off screen or in a hidden tab |
+| **Landing:** header | Bar to pill on scroll, 500 ms on the same curve |
+| **Landing:** sections | Each heading, step, and reliability row fades and lifts 16 px once, the first time it enters the viewport; siblings stagger by 90–120 ms |
+| **Landing:** step visuals | Start when visible: the recipient count counts up to 1,240 and sender chips appear in turn; the miniature strip draws its ticks left to right; timetable rows step through Scheduled, Sending, Sent on a loop |
+| **Landing:** closing mark | The four ticks draw upward in turn, 140 ms apart |
+| Reduced motion | Everything above is instant or static; content never starts hidden (reveal states apply only with motion allowed); loops stop on their final frame; anchor scrolling jumps |
+
+Motion on the landing page always shows the product doing its job (sending, pacing, deferring); nothing moves just to decorate. No parallax, no scroll-jacking, no bounce.
 
 ## 10. Accessibility
 
