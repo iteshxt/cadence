@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { Suspense, type ReactNode } from 'react';
+import { ComposePanel } from '@/components/compose/compose-panel';
 import { AppHeader } from '@/components/layout/app-header';
 import { getSessionUser } from '@/lib/supabase/server';
 
@@ -16,6 +17,9 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       <main className="mx-auto max-w-[1200px] px-6 pt-8 pb-16 max-md:px-4 max-md:pt-6">
         {children}
       </main>
+      <Suspense>
+        <ComposePanel />
+      </Suspense>
     </div>
   );
 }
