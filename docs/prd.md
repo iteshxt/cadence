@@ -1,0 +1,253 @@
+# Cadence — Product Requirements Document
+
+> **Cadence** is a reliable, rate-aware email scheduler with a clean dashboard.
+> Schedule thousands of emails, send them at the right pace, and never send one twice.
+
+| | |
+|---|---|
+| **Project** | Cadence (repo: `cadence`) |
+| **Category** | Email infrastructure: outbound scheduling and delivery |
+| **Author** | _you_ |
+| **Status** | Draft v1 |
+| **Timebox** | 48 hours |
+| **Companion docs** | [`tech-spec.md`](./tech-spec.md) · [`design.md`](./design.md) |
+
+---
+
+## 1. Problem
+
+Cold-outreach teams must send large volumes of email **at a precise time**, **at a safe pace**, and **exactly once**. Every email provider throttles senders, and going over the limit gets a domain flagged.
+
+The infrastructure also has to survive crashes and deploys without losing or duplicating mail.
+
+Cadence solves this with two pieces:
+
+- an API and worker that schedule and send email through a persistent queue
+- a dashboard where a user composes a campaign and watches it go out
+
+## 2. Goals
+
+1. **Correct scheduling.** Every email is sent at or after its scheduled time, never before.
+2. **Exactly-once delivery from the user's point of view.** No duplicates, even across restarts, retries, or multiple workers.
+3. **Durability.** A server restart never loses a job and never resets the schedule.
+4. **Provider-safe throughput.** The system enforces configurable concurrency, a minimum gap between sends, and hourly caps. Overflow is deferred, never dropped.
+5. **Observability.** The live queue dashboard, searchable email history, and Slack alerts when limits are hit together make system behavior visible.
+6. **A professional, minimal UI** that people enjoy using.
+
+## 3. Non-goals
+
+- Real email delivery. All mail goes through **Ethereal** (fake SMTP).
+- Email templating, open and click tracking, reply detection, and lead enrichment.
+- Multi-tenant organizations, teams, or roles. One user is one tenant.
+- Billing.
+- Rich-text or HTML email editing. The body is plain text.
+
+## 4. Users
+
+| Persona | Need |
+|---|---|
+| **Growth marketer** (primary) | Upload a lead list, write a message, pick a start time and pace, and trust it to go out correctly. |
+| **Operator / engineer** | Check queue health, persistence, rate limiting, and idempotency quickly through Bull Board, logs, and the docs. |
+
+## 5. Hard constraints
+
+These are non-negotiable and any design that violates them is wrong.
+
+| # | Constraint |
+|---|---|
+| C1 | Backend in **TypeScript + Express.js** |
+| C2 | Queue is **BullMQ on Redis** |
+| C3 | Database is **PostgreSQL** (we use **Supabase** Postgres). **MongoDB is not allowed.** |
+| C4 | Email is sent through **Ethereal SMTP** |
+| C5 | **No cron**: no crontab, no `node-cron`, no `agenda`, no repeatable jobs used as a cron substitute |
+| C6 | Persistent across restarts, with no lost or duplicated emails |
+| C7 | Idempotent: the same email is never sent more than once |
+| C8 | Frontend in **Next.js + Tailwind + TypeScript** |
+| C9 | **Real Google OAuth** (no mock) |
+| C10 | **Real Slack OAuth** plus a live Slack message when a sender's hourly limit is hit |
+| C11 | Emails are searchable through **Elasticsearch** |
+| C12 | **Live BullMQ dashboard** exposed |
+
+## 6. Functional requirements
+
+Priority key: **P0** = must ship in v1. **P1** = should ship (strong signal). **P2** = nice to have.
+
+### 6.1 Authentication
+
+| ID | Requirement | Priority |
+|---|---|---|
+| AUTH-1 | The user signs in with **Google OAuth**, using Supabase Auth with the Google provider. | P0 |
+| AUTH-2 | After sign-in, the user is redirected to `/dashboard`. | P0 |
+| AUTH-3 | The header shows the user's **name, email, and avatar**. | P0 |
+| AUTH-4 | **Logout** clears the session and returns the user to `/`. | P0 |
+| AUTH-5 | Dashboard routes are protected. Unauthenticated users are redirected to `/login`. | P0 |
+| AUTH-6 | Every backend API call is authenticated with the Supabase JWT. The backend verifies it and scopes all data to that user. | P0 |
+
+### 6.2 Compose and schedule a campaign
+
+A **campaign** is one compose action. It contains one subject, one body, many recipients, and pacing settings. Each recipient becomes one **email** (one job).
+
+| ID | Requirement | Priority |
+|---|---|---|
+| CMP-1 | The user can open **Compose New Email** from a primary button. | P0 |
+| CMP-2 | Fields: **Subject** (required, at most 200 characters) and **Body** (required, plain text, at most 10,000 characters). | P0 |
+| CMP-3 | The user can **upload a CSV or TXT file** of leads. The file is parsed client-side. The form shows the **count of valid emails detected**, plus counts of duplicates and invalid entries removed. | P0 |
+| CMP-4 | **Start time**: date and time in the user's local timezone. It must be now or in the future. "Send now" is a shortcut. | P0 |
+| CMP-5 | **Delay between emails** in seconds (minimum 1, default 2). | P0 |
+| CMP-6 | **Hourly limit** for this campaign (default 100, capped by the server's per-sender maximum). | P0 |
+| CMP-7 | **Send from**: choose one or more sender accounts. Recipients are distributed round-robin across the chosen senders. The default is all senders. | P1 |
+| CMP-8 | **Schedule** sends the campaign to the backend. On success, the form closes, shows a toast ("1,240 emails scheduled"), and refreshes the Scheduled tab. | P0 |
+| CMP-9 | Client-side and server-side validation with inline error messages. | P0 |
+| CMP-10 | A preview line shows the estimated finish time, given the count, delay, hourly limit, and number of senders. | P1 |
+| CMP-11 | Upload limits: at most 5,000 recipients per campaign and at most 2 MB per file. | P0 |
+
+### 6.3 Scheduled emails
+
+| ID | Requirement | Priority |
+|---|---|---|
+| SCH-1 | A table with the columns **Email, Subject, Scheduled time, Status**. | P0 |
+| SCH-2 | Includes the statuses `scheduled`, `deferred` (pushed back by the rate limit), and `sending`. | P0 |
+| SCH-3 | Sorted by scheduled time, ascending. | P0 |
+| SCH-4 | **Loading** skeleton and an **empty state** with a Compose call to action. | P0 |
+| SCH-5 | Paginated (cursor-based, 25 rows per page). | P0 |
+| SCH-6 | Automatically refreshes every 5 seconds while the tab is visible. | P1 |
+| SCH-7 | Deferred rows show a tooltip explaining why ("Hourly limit reached for sender X — moved to 15:00"). | P1 |
+| SCH-8 | The user can cancel a scheduled email. | P2 |
+
+### 6.4 Sent emails
+
+| ID | Requirement | Priority |
+|---|---|---|
+| SNT-1 | A table with the columns **Email, Subject, Sent time, Status** (`sent` or `failed`). | P0 |
+| SNT-2 | Sorted by sent time, descending. | P0 |
+| SNT-3 | **Loading** and **empty** states. | P0 |
+| SNT-4 | A **Preview** link opens the Ethereal message URL, so anyone can verify delivery. | P1 |
+| SNT-5 | Failed rows show the error reason. | P1 |
+
+### 6.5 Search (Elasticsearch)
+
+| ID | Requirement | Priority |
+|---|---|---|
+| SRC-1 | Every email is indexed in Elasticsearch on creation and on every status change. | P0 |
+| SRC-2 | A search bar in the dashboard supports full-text search over recipient, subject, and body, filtered by status. | P0 |
+| SRC-3 | Search results are scoped to the signed-in user. | P0 |
+| SRC-4 | A reindex script rebuilds the index from Postgres. | P1 |
+
+### 6.6 Scheduler and delivery
+
+| ID | Requirement | Priority |
+|---|---|---|
+| SCD-1 | Each email is a **BullMQ delayed job** whose delay is computed from its `scheduled_at`. No cron. | P0 |
+| SCD-2 | Emails are sent through **Ethereal SMTP** from **multiple sender accounts**. | P0 |
+| SCD-3 | **Persistence.** Jobs survive restarts of the API, the worker, and Redis (with Redis AOF on). On boot, a reconciler re-enqueues any `scheduled` email that has no job in Redis. | P0 |
+| SCD-4 | **Idempotency.** The job ID equals the email ID, sends are claimed in the database with an atomic status transition, and the send happens only after a successful claim. | P0 |
+| SCD-5 | Transient SMTP errors are retried 3 times with exponential backoff. After that, the email is marked `failed` with a reason. | P0 |
+| SCD-6 | The send time and the Ethereal message ID and preview URL are stored. | P0 |
+
+### 6.7 Throughput, rate limiting, and concurrency
+
+| ID | Requirement | Priority |
+|---|---|---|
+| RL-1 | The worker's **concurrency** is configurable through `WORKER_CONCURRENCY` (default 5). | P0 |
+| RL-2 | A **minimum gap between sends per sender**, configured through `MIN_SEND_GAP_MS` (default 2000 ms), is enforced with Redis so it holds across workers. | P0 |
+| RL-3 | A **per-sender hourly cap**, configured through `MAX_EMAILS_PER_HOUR_PER_SENDER` (default 200), uses Redis counters keyed by `sender + hour window`. | P0 |
+| RL-4 | The **campaign hourly limit** from the compose form is also enforced. The effective limit is the minimum of the campaign limit and the sender limit. | P0 |
+| RL-5 | When a limit is hit, the job is **deferred to the next hour window** (status `deferred`) in **original order**. Jobs are never dropped or failed because of a limit. | P0 |
+| RL-6 | All limit checks are **atomic** (Redis Lua scripts) and safe with multiple worker processes. | P0 |
+| RL-7 | Defined behavior for **1,000+ emails at the same instant**. See tech-spec §9. | P0 |
+| RL-8 | A load-test script schedules N emails to demonstrate the behavior. | P1 |
+
+### 6.8 Slack notifications
+
+| ID | Requirement | Priority |
+|---|---|---|
+| SLK-1 | The settings page has a **Connect Slack** button that starts the real Slack OAuth v2 flow. | P0 |
+| SLK-2 | The backend exchanges the code and stores the incoming-webhook URL and access token per user, encrypted at rest. | P0 |
+| SLK-3 | The moment a sender's hourly limit is reached, a **real Slack message** is posted. At most one message is sent per sender per hour window. | P0 |
+| SLK-4 | If Slack is not connected, nothing is sent and nothing crashes. | P0 |
+| SLK-5 | The user can **disconnect** and **reconnect** without a redeploy. The next limit hit uses the current state. | P0 |
+| SLK-6 | A **Send test message** button is available. | P1 |
+| SLK-7 | Slack failures never block or fail email sending, because notifications go through a separate queue. | P0 |
+
+### 6.9 Queue dashboard
+
+| ID | Requirement | Priority |
+|---|---|---|
+| QD-1 | **Bull Board** is mounted at `/admin/queues` on the API and shows live jobs, delays, failures, and retries. | P0 |
+| QD-2 | It is protected with HTTP basic auth, using credentials from the environment. | P0 |
+| QD-3 | The dashboard header links to it. | P1 |
+
+### 6.10 Dashboard overview
+
+| ID | Requirement | Priority |
+|---|---|---|
+| OV-1 | Stat cards for **Scheduled, Sent today, Failed, and Deferred**. | P1 |
+| OV-2 | A per-sender usage meter for the current hour (for example, "142 / 200"). | P2 |
+
+## 7. Pages (summary)
+
+Full details are in tech-spec §6 and design.md §8.
+
+| Route | Purpose | Auth |
+|---|---|---|
+| `/` | Landing page: hero, how it works, features, sign-in call to action | Public |
+| `/login` | Sign in with Google | Public |
+| `/auth/callback` | Supabase OAuth code exchange | Public |
+| `/dashboard` | Redirects to `/dashboard/scheduled` | Private |
+| `/dashboard/scheduled` | Scheduled emails table, stats, and the Compose button | Private |
+| `/dashboard/sent` | Sent emails table | Private |
+| `/dashboard/search` | Elasticsearch-backed search results | Private |
+| `/dashboard/settings` | Integrations (Slack), senders, and limits (read-only) | Private |
+| _Compose modal_ | Opens over any dashboard page (`?compose=1`) | Private |
+
+## 8. Non-functional requirements
+
+| Area | Requirement |
+|---|---|
+| **Reliability** | Zero duplicate sends in restart and kill tests. Zero lost jobs after restarting the API, the worker, or Redis. |
+| **Accuracy** | An email is never sent before `scheduled_at`. Under normal load it goes out within 5 seconds of its eligible time (excluding deliberate deferral). |
+| **Scale** | Accepts a 5,000-recipient campaign in under 3 seconds, using batched database inserts and BullMQ `addBulk`. |
+| **Security** | JWTs are verified through JWKS. Every query is scoped by `user_id`. Slack secrets are encrypted with AES-256-GCM. Requests are validated with Zod. Bull Board is behind auth. Secrets are never committed. |
+| **Performance** | Dashboard tables load in under 500 ms (p95) for 10,000 rows, using indexed cursor pagination. |
+| **Accessibility** | WCAG 2.1 AA contrast, full keyboard navigation, and visible focus rings. |
+| **Code quality** | Strict TypeScript, shared Zod schemas between front and back end, ESLint and Prettier, and unit tests for the rate limiter and scheduling math. |
+| **Ops** | Health endpoint, structured logs (pino), graceful shutdown (draining the worker before exit), and Docker Compose for local infrastructure. |
+
+## 9. Acceptance criteria
+
+1. A user signs in with Google and the header shows their name, email, and avatar.
+2. Uploading a CSV shows the detected count. The user schedules emails a couple of minutes in the future, and they appear in **Scheduled**.
+3. They move to **Sent** on time, and the Ethereal preview link opens the real message.
+4. **Restart test:** stop the API and worker, wait until past a scheduled time, start them again. The overdue emails send immediately, exactly once, and future emails keep their times.
+5. **Rate limit:** schedule 30 emails with a low cap (`MAX_EMAILS_PER_HOUR_PER_SENDER=5` for testing). Extra emails show `deferred` with next-hour times, and **a Slack message arrives live**.
+6. Disconnect Slack and trigger the limit again: there is no message and no crash. Reconnect and it works again.
+7. Bull Board shows delayed, active, and completed jobs live.
+8. Search finds emails by recipient or subject.
+
+## 10. Assumptions and trade-offs
+
+- **The hour window is a fixed UTC clock hour** (for example, 14:00–14:59), not a sliding window. This is simpler and easy to reason about and test. The trade-off is a possible burst of up to 2× the cap around a window boundary, which is acceptable for this scope.
+- **At-most-once on crash during an SMTP call.** If a worker dies after the SMTP server accepted a message but before the database was updated, the email is marked `failed` (reason: `interrupted`) instead of being retried. We prefer a rare missed send over a duplicate, because for outreach a duplicate email does more damage than a missed one.
+- **Senders are pre-provisioned** Ethereal accounts, set through the environment or a seed script. There is no UI for adding SMTP credentials.
+- **One user is one tenant.** Slack connections and campaigns belong to a user.
+- **Deployment:** the web app runs on Vercel, and the API and worker run on Railway. See tech-spec §13.
+- **design.md is the source of truth** for the UI: tokens, components, and page layouts.
+
+## 11. Milestones (48 hours)
+
+| # | Window | Deliverable |
+|---|---|---|
+| M0 | 0–2 h | Monorepo scaffold, Docker Compose (Redis + Elasticsearch), Supabase project, Google provider, env templates |
+| M1 | 2–10 h | Database schema and migrations, campaign API, scheduler (enqueue), worker (send through Ethereal), idempotent claims |
+| M2 | 10–16 h | Rate limiter (Lua), minimum gap, deferral logic, startup reconciler, restart tests |
+| M3 | 16–26 h | Next.js landing, login, dashboard, compose, and tables, wired to the API |
+| M4 | 26–32 h | Slack OAuth, notifications queue, and settings page |
+| M5 | 32–37 h | Elasticsearch indexing, search UI, and Bull Board |
+| M6 | 37–43 h | Polish (empty, loading, and error states), tests, load script, deployment |
+| M7 | 43–48 h | README, architecture diagram, walkthrough video, launch |
+
+## 12. Open questions
+
+1. Should the hourly window become a sliding window in v2 to remove boundary bursts?
+2. Do we need team workspaces (multi-user tenants) after v1?
+3. Should the hourly limit be global or per sender? v1 implements **per sender plus per campaign**, which covers both.
