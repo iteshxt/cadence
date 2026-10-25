@@ -67,9 +67,9 @@ export function LandingHeader() {
       <div
         className={cn(
           'pointer-events-auto mx-auto flex items-center gap-6',
-          'motion-safe:transition-[max-width,height,margin,padding,border-radius,background-color,box-shadow] motion-safe:duration-500 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]',
+          'motion-safe:transition-[max-width,height,margin,padding,border-radius,background-color,box-shadow,backdrop-filter] motion-safe:duration-500 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]',
           scrolled
-            ? 'mt-3 h-16 max-w-[920px] rounded-[32px] bg-surface/90 pr-3 pl-6 shadow-float backdrop-blur-md max-md:pl-4'
+            ? 'mt-3 h-16 max-w-[920px] rounded-control bg-surface/60 pr-3 pl-6 shadow-float backdrop-blur-xl backdrop-saturate-150 max-md:pl-4'
             : 'mt-0 h-20 max-w-[1280px] rounded-none bg-transparent px-3 shadow-none max-md:px-1',
         )}
       >
@@ -88,7 +88,7 @@ export function LandingHeader() {
               href={`#${l.id}`}
               aria-current={active === l.id ? 'true' : undefined}
               className={cn(
-                'rounded-full px-4 py-2 text-body-lg transition-colors duration-200',
+                'rounded-control px-4 py-2 text-body-lg transition-colors duration-200',
                 active === l.id ? 'bg-sunken text-ink' : 'text-ink-2 hover:text-ink',
               )}
             >
@@ -102,7 +102,7 @@ export function LandingHeader() {
             variant="ghost"
             size="icon"
             aria-label="Cadence on GitHub"
-            className="size-10 rounded-full"
+            className="size-10"
           >
             <a href={publicEnv.githubUrl} target="_blank" rel="noreferrer noopener">
               <GitHubMark className="size-5" />
