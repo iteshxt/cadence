@@ -182,8 +182,10 @@ export default function LandingPage() {
                   key={g.label}
                   className={cn(
                     'py-7 pr-6 max-lg:py-5',
-                    i > 0 && 'lg:border-l lg:border-line lg:pl-8',
-                    i % 2 === 1 && 'max-lg:border-l max-lg:border-line max-lg:pl-6',
+                    // Soft dividers that fade out at both ends instead of hard rules.
+                    'relative before:absolute before:inset-y-3 before:left-0 before:w-px before:bg-linear-to-b before:from-transparent before:via-line before:to-transparent',
+                    i === 0 ? 'before:hidden' : 'lg:pl-8',
+                    i % 2 === 1 ? 'max-lg:pl-6' : 'max-lg:before:hidden',
                   )}
                 >
                   <dt className="sr-only">{g.label}</dt>
