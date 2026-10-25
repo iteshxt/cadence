@@ -4,7 +4,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { Logo } from '@/components/brand/logo';
 import { GitHubMark, GoogleG } from '@/components/brand/third-party';
 import { StatusMark } from '@/components/emails/status-mark';
-import { HeroStrip } from '@/components/landing/hero-strip';
+import { HeroQueue } from '@/components/landing/hero-queue';
 import { LandingHeader } from '@/components/landing/landing-header';
 import { Reveal, TicksMark } from '@/components/landing/reveal';
 import { PaceVisual, SendVisual, UploadVisual } from '@/components/landing/step-visuals';
@@ -163,14 +163,14 @@ export default function LandingPage() {
               </p>
             </div>
 
-            {/* The board sits on a teal "stage" so the hero carries the brand color. */}
+            {/* The live queue sits on a teal "stage" so the hero carries the brand color. */}
             <div style={rise(300)} className="relative min-w-0 motion-safe:animate-rise">
               <div
                 aria-hidden
                 className="absolute -inset-4 rounded-[28px] bg-signal-soft sm:-inset-6 lg:-inset-8 lg:translate-x-5 lg:translate-y-5"
               />
               <div className="relative">
-                <HeroStrip />
+                <HeroQueue />
               </div>
             </div>
           </div>
