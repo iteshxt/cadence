@@ -86,6 +86,26 @@ describe('estimateFinish', () => {
     expect(r.capacityPerHour).toBe(600);
   });
 
+  it("applies each sender's own cap when senderCaps is given", () => {
+    const r = estimateFinish({
+      count: 10,
+      startMs: at('2026-10-25T14:00:00Z'),
+      intervalMs: 1000,
+      senderCount: 0,
+      maxPerHourPerSender: 0,
+      senderCaps: [2, 10],
+      minSendGapMs: 1000,
+      collect: true,
+    });
+    // Sender 0 gets emails 0, 2, 4, 6, 8: two fit its cap of 2 at 14:00, two more at 15:00, and
+    // the last at 16:00. Sender 1 gets 1, 3, 5, 7, 9, all under its cap of 10.
+    expect(r.deferredCount).toBe(3);
+    expect(r.sends.filter((x) => x.deferred).every((x) => x.senderIndex === 0)).toBe(true);
+    expect(r.capacityPerHour).toBe(12);
+    expect(r.overCapacity).toBe(true);
+    expect(r.finishAtMs).toBe(at('2026-10-25T16:00:00Z'));
+  });
+
   it('does not defer anything when the plan fits under the caps', () => {
     const r = estimateFinish({
       count: 1240,

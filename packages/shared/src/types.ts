@@ -16,6 +16,7 @@ export type ApiErrorCode =
   | 'RATE_LIMITED'
   | 'SLACK_NOT_CONNECTED'
   | 'SLACK_ERROR'
+  | 'GMAIL_ERROR'
   | 'SEARCH_UNAVAILABLE'
   | 'CONFLICT'
   | 'INTERNAL';
@@ -35,15 +36,26 @@ export interface AppConfig {
   startGraceMs: number;
 }
 
+/** One of the user's connected Gmail accounts (tech-spec §7.3). */
 export interface SenderDto {
   id: string;
   label: string;
   fromEmail: string;
-  /** Sends counted against this sender in the current UTC hour (all users). */
-  usedThisHour: number;
+  /** The "From" name recipients see; null uses the address alone. */
+  displayName: string | null;
+  /** This sender's hourly limit. */
   cap: number;
+  /** `reconnect`: Google stopped accepting the stored access; the sender can't send. */
+  status: 'connected' | 'reconnect';
+  /** Sends counted against this sender in the current UTC hour. */
+  usedThisHour: number;
   /** ISO start of the next UTC hour, when usage resets. */
   resetsAt: string;
+}
+
+export interface UserSettings {
+  defaultDelaySeconds: number;
+  defaultHourlyLimit: number;
 }
 
 export interface CreateCampaignResponse {

@@ -33,6 +33,10 @@ export const LIMITS = {
   HOURLY_MIN: 1,
   HOURLY_MAX: 3_600,
   HOURLY_DEFAULT: 100,
+  /** A new Gmail sender's hourly limit: about 480 a day, under Gmail's ~500 for personal accounts. */
+  SENDER_HOURLY_DEFAULT: 20,
+  SENDER_LABEL_MAX: 60,
+  SENDER_DISPLAY_NAME_MAX: 80,
   PAGE_SIZE: 25,
   PAGE_SIZE_MAX: 100,
   SEARCH_QUERY_MAX: 200,

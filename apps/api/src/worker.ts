@@ -8,12 +8,10 @@ import { createSendEmailProcessor } from './jobs/sendEmail.processor.js';
 import { createRedis } from './queues/connection.js';
 import { EMAIL_QUEUE, type SendJobData } from './queues/emailQueue.js';
 import { NOTIFY_QUEUE, type NotifyJobData } from './queues/notifyQueue.js';
-import { createMailer } from './services/mailer.service.js';
 import { reconcile } from './services/reconciler.service.js';
 
 const env = parseEnv();
 const ctx = createContext(env);
-const mailer = createMailer(ctx.crypto);
 
 // Workers get their own connections: blocking commands must not share the app connection.
 const emailConnection = createRedis(env.REDIS_URL);
@@ -25,7 +23,7 @@ const emailWorker = new Worker<SendJobData, void, string>(
     db: ctx.db,
     repo: ctx.repo,
     rateLimiter: ctx.rateLimiter,
-    send: mailer.send,
+    send: ctx.gmail.send,
     search: ctx.search,
     notifyQueue: ctx.notifyQueue,
     log: ctx.log.child({ component: 'send' }),
@@ -85,7 +83,8 @@ ctx.log.info(
   {
     concurrency: env.WORKER_CONCURRENCY,
     minGapMs: env.MIN_SEND_GAP_MS,
-    capPerHour: env.MAX_EMAILS_PER_HOUR_PER_SENDER,
+    maxCapPerHour: env.MAX_EMAILS_PER_HOUR_PER_SENDER,
+    dryRun: env.SEND_DRY_RUN,
   },
   'worker started',
 );
@@ -97,7 +96,6 @@ async function shutdown(signal: string) {
   ctx.log.info({ signal }, 'draining worker');
   // close() waits for active jobs to finish; delayed jobs stay in Redis (tech-spec §8).
   await Promise.allSettled([emailWorker.close(), notifyWorker.close()]);
-  mailer.close();
   await Promise.allSettled([emailConnection.quit(), notifyConnection.quit()]);
   await ctx.close();
   ctx.log.info('worker stopped');

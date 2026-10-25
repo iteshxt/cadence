@@ -6,10 +6,11 @@ import {
   type Timeline,
   type TimelineBucket,
 } from '@cadence/shared';
-import { and, asc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../db/client.js';
 import { emails, senders } from '../db/schema.js';
 import type { RateLimiter } from './ratelimit.service.js';
+import { senderCap } from './senders.service.js';
 
 const BUCKET_STEPS_MS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900].map((s) => s * 1000);
 
@@ -24,6 +25,7 @@ export function pickBucketMs(
 export interface TimelineDeps {
   db: Db;
   rateLimiter: RateLimiter;
+  /** The server maximum; each sender's own limit is clamped to it. */
   maxPerHourPerSender: number;
   now?: () => number;
 }
@@ -36,13 +38,6 @@ export function createTimeline(deps: TimelineDeps) {
       const from = new Date(fromIso);
       const to = new Date(toIso);
       const bucketMs = pickBucketMs(to.getTime() - from.getTime());
-      const cap = deps.maxPerHourPerSender;
-
-      const activeSenders = await deps.db
-        .select({ id: senders.id, label: senders.label })
-        .from(senders)
-        .where(eq(senders.isActive, true))
-        .orderBy(asc(senders.label), asc(senders.id));
 
       // Pending emails sit at their planned time; finished ones at the time they finished.
       const ts = sql`case when ${emails.status} in ('scheduled', 'deferred', 'sending') then ${emails.nextAttemptAt} else ${emails.finishedAt} end`;
@@ -67,6 +62,24 @@ export function createTimeline(deps: TimelineDeps) {
         )
         .groupBy(emails.senderId, bucket, emails.status);
 
+      // Lanes: the user's active senders, plus any sender (since disconnected) with emails in range.
+      const inRange = [...new Set(rows.map((r) => r.senderId))];
+      const laneRows = await deps.db
+        .select({ id: senders.id, label: senders.label, hourlyLimit: senders.hourlyLimit })
+        .from(senders)
+        .where(
+          or(
+            and(eq(senders.userId, userId), eq(senders.isActive, true)),
+            inRange.length > 0 ? inArray(senders.id, inRange) : undefined,
+          ),
+        )
+        .orderBy(asc(senders.label), asc(senders.id));
+      const lanes = laneRows.map((r) => ({
+        id: r.id,
+        label: r.label,
+        cap: senderCap(r, deps.maxPerHourPerSender),
+      }));
+
       const buckets = new Map<string, TimelineBucket>();
       for (const r of rows) {
         const t = Number(r.bucket) * bucketMs;
@@ -88,12 +101,11 @@ export function createTimeline(deps: TimelineDeps) {
       }
 
       // Per-sender usage of each hour window in range. Recent and future hours come from the
-      // shared Redis counters (they include other users' sends, since senders are shared);
-      // older hours, whose counters have expired, are counted from Postgres.
+      // Redis counters; older hours, whose counters have expired, are counted from Postgres.
       const firstHour = hourIndex(from.getTime());
       const lastHour = hourIndex(to.getTime() - 1);
       const currentHour = hourIndex(now());
-      const ids = activeSenders.map((s) => s.id);
+      const ids = lanes.map((s) => s.id);
       const windows: Timeline['windows'] = [];
       for (let h = firstHour; h <= lastHour; h++) {
         let usage: Map<string, number>;
@@ -117,12 +129,12 @@ export function createTimeline(deps: TimelineDeps) {
             .groupBy(emails.senderId);
           usage = new Map(past.map((p) => [p.senderId, p.n]));
         }
-        for (const id of ids) {
+        for (const lane of lanes) {
           windows.push({
-            senderId: id,
+            senderId: lane.id,
             hourStart: new Date(hourStartMs(h)).toISOString(),
-            used: usage.get(id) ?? 0,
-            cap,
+            used: usage.get(lane.id) ?? 0,
+            cap: lane.cap,
           });
         }
       }
@@ -131,7 +143,7 @@ export function createTimeline(deps: TimelineDeps) {
         from: from.toISOString(),
         to: to.toISOString(),
         bucketMs,
-        senders: activeSenders.map((s) => ({ ...s, cap })),
+        senders: lanes,
         buckets: [...buckets.values()].sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0)),
         windows,
       };

@@ -13,7 +13,6 @@
     "start:worker": "node dist/src/worker.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "seed:senders": "tsx scripts/seed-senders.ts",
     "reindex": "tsx scripts/reindex.ts",
     "load-test": "tsx scripts/load-test.ts"
   },

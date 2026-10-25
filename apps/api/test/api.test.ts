@@ -3,6 +3,7 @@ import request from 'supertest';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import type { VerifyToken } from '../src/middleware/auth.js';
+import { profiles } from '../src/db/schema.js';
 import { recipients, resetState, seedSenders, testContext } from './helpers.js';
 
 const ctx = testContext();
@@ -41,7 +42,12 @@ beforeEach(async () => {
   bob = { id: randomUUID(), email: 'bob@example.com' };
   await resetState(ctx);
   await ctx.emailQueue.obliterate({ force: true });
-  await seedSenders(ctx, 3);
+  // Alice has three connected Gmail senders; Bob has none.
+  await ctx.db.insert(profiles).values([
+    { id: alice.id, email: alice.email },
+    { id: bob.id, email: bob.email },
+  ]);
+  await seedSenders(ctx, alice.id, 3);
 });
 afterAll(async () => {
   await ctx.close();
@@ -245,6 +251,88 @@ describe('reading emails', () => {
   });
 });
 
+describe('senders and settings', () => {
+  const firstSender = async () =>
+    (await request(app).get('/api/senders').set(auth(alice))).body.items[0] as { id: string };
+
+  it('edits a sender within the server maximum', async () => {
+    const { id } = await firstSender();
+    const res = await request(app)
+      .patch(`/api/senders/${id}`)
+      .set(auth(alice))
+      .send({ label: ' Sales ', displayName: 'Alice from Acme', hourlyLimit: 25 });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ label: 'Sales', displayName: 'Alice from Acme', cap: 25 });
+
+    const tooHigh = await request(app)
+      .patch(`/api/senders/${id}`)
+      .set(auth(alice))
+      .send({ hourlyLimit: 201 });
+    expect(tooHigh.status).toBe(400);
+    expect(tooHigh.body.error.details.fields.hourlyLimit).toMatch(/at most 200/);
+  });
+
+  it("never lets one user edit, disconnect, or send from another user's sender", async () => {
+    const { id } = await firstSender();
+    expect(
+      (await request(app).patch(`/api/senders/${id}`).set(auth(bob)).send({ label: 'Mine' }))
+        .status,
+    ).toBe(404);
+    expect((await request(app).delete(`/api/senders/${id}`).set(auth(bob))).status).toBe(404);
+    const res = await request(app)
+      .post('/api/campaigns')
+      .set(auth(bob))
+      .send(campaign({ senderIds: [id] }));
+    expect(res.status).toBe(400);
+    expect(res.body.error.details.fields.senderIds).toBeDefined();
+  });
+
+  it('refuses a campaign until the user connects a sender', async () => {
+    const res = await request(app).post('/api/campaigns').set(auth(bob)).send(campaign());
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('NO_SENDERS');
+    expect(res.body.error.message).toMatch(/Connect a Gmail account/);
+  });
+
+  it('disconnects a sender, which then disappears from the list', async () => {
+    const { id } = await firstSender();
+    expect((await request(app).delete(`/api/senders/${id}`).set(auth(alice))).status).toBe(204);
+    const list = (await request(app).get('/api/senders').set(auth(alice))).body.items;
+    expect(list.map((s: { id: string }) => s.id)).not.toContain(id);
+    expect((await request(app).delete(`/api/senders/${id}`).set(auth(alice))).status).toBe(404);
+  });
+
+  it('saves Compose defaults', async () => {
+    expect((await request(app).get('/api/settings').set(auth(alice))).body).toEqual({
+      defaultDelaySeconds: 2,
+      defaultHourlyLimit: 100,
+    });
+    const saved = await request(app)
+      .put('/api/settings')
+      .set(auth(alice))
+      .send({ defaultDelaySeconds: 5, defaultHourlyLimit: 60 });
+    expect(saved.status).toBe(200);
+    expect((await request(app).get('/api/settings').set(auth(alice))).body).toEqual({
+      defaultDelaySeconds: 5,
+      defaultHourlyLimit: 60,
+    });
+    const bad = await request(app)
+      .put('/api/settings')
+      .set(auth(alice))
+      .send({ defaultDelaySeconds: 0, defaultHourlyLimit: 60 });
+    expect(bad.status).toBe(400);
+  });
+
+  it('refuses to connect Gmail when it is not configured, and sends callback errors to Settings', async () => {
+    const res = await request(app).post('/api/integrations/gmail/authorize').set(auth(alice));
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('GMAIL_ERROR');
+    const cb = await request(app).get('/api/integrations/gmail/callback?error=access_denied');
+    expect(cb.status).toBe(303);
+    expect(cb.headers.location).toBe('http://localhost:3000/dashboard/settings?gmail=cancelled');
+  });
+});
+
 describe('platform', () => {
   it('serves config without secrets', async () => {
     const res = await request(app).get('/api/config').set(auth(alice));
@@ -257,10 +345,12 @@ describe('platform', () => {
     });
   });
 
-  it('lists senders without SMTP credentials', async () => {
+  it("lists only the user's own senders, without tokens", async () => {
     const res = await request(app).get('/api/senders').set(auth(alice));
     expect(res.body.items).toHaveLength(3);
-    expect(JSON.stringify(res.body)).not.toMatch(/smtp|pass/i);
+    expect(res.body.items[0]).toMatchObject({ label: 'Sender A', cap: 200, status: 'connected' });
+    expect(JSON.stringify(res.body)).not.toMatch(/token|refresh/i);
+    expect((await request(app).get('/api/senders').set(auth(bob))).body.items).toEqual([]);
   });
 
   it('reports health, degraded when search is down', async () => {

@@ -28,22 +28,38 @@ export const profiles = pgTable('profiles', {
   email: text('email').notNull(),
   fullName: text('full_name'),
   avatarUrl: text('avatar_url'),
+  /** Compose defaults (PRD SET-6); null means the product default. */
+  defaultDelaySeconds: integer('default_delay_seconds'),
+  defaultHourlyLimit: integer('default_hourly_limit'),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 });
 
-/** Pre-provisioned Ethereal accounts, shared by all users. */
-export const senders = pgTable('senders', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  label: text('label').notNull(),
-  fromEmail: text('from_email').notNull().unique(),
-  smtpHost: text('smtp_host').notNull().default('smtp.ethereal.email'),
-  smtpPort: integer('smtp_port').notNull().default(587),
-  smtpUser: text('smtp_user').notNull(),
-  smtpPassEnc: text('smtp_pass_enc').notNull(),
-  isActive: boolean('is_active').notNull().default(true),
-  createdAt: ts('created_at').notNull().defaultNow(),
-});
+/** A user's connected Gmail accounts (tech-spec §4, §7.3). */
+export const senders = pgTable(
+  'senders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Null only for the retired v1 Ethereal senders, which stay for their emails' history. */
+    userId: uuid('user_id').references(() => profiles.id, { onDelete: 'cascade' }),
+    provider: text('provider', { enum: ['gmail'] })
+      .notNull()
+      .default('gmail'),
+    label: text('label').notNull(),
+    fromEmail: citext('from_email').notNull(),
+    displayName: text('display_name'),
+    hourlyLimit: integer('hourly_limit').notNull().default(20),
+    refreshTokenEnc: text('refresh_token_enc'),
+    isActive: boolean('is_active').notNull().default(true),
+    needsReconnect: boolean('needs_reconnect').notNull().default(false),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    unique('senders_user_from_email').on(t.userId, t.fromEmail),
+    index('senders_user_active').on(t.userId, t.isActive),
+  ],
+);
 
 export const campaigns = pgTable(
   'campaigns',

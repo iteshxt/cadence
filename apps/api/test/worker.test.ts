@@ -3,11 +3,11 @@ import { hourIndex, hourStartMs } from '@cadence/shared';
 import { UnrecoverableError, Worker } from 'bullmq';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { campaigns, emails, rateLimitEvents } from '../src/db/schema.js';
+import { campaigns, emails, rateLimitEvents, senders } from '../src/db/schema.js';
 import { createSendEmailProcessor } from '../src/jobs/sendEmail.processor.js';
 import { createRedis } from '../src/queues/connection.js';
 import { EMAIL_QUEUE, sendJobOptions, type SendJobData } from '../src/queues/emailQueue.js';
-import type { OutgoingEmail, SendFn } from '../src/services/mailer.service.js';
+import { GmailError, type OutgoingEmail, type SendFn } from '../src/services/gmail.service.js';
 import { reconcile } from '../src/services/reconciler.service.js';
 import { recipients, resetState, seedSenders, seedUser, testContext, waitFor } from './helpers.js';
 
@@ -19,7 +19,7 @@ let sendImpl: SendFn = async (_s, e) => {
   sent.push(e);
   return {
     messageId: `<${e.emailId}@cadence.local>`,
-    previewUrl: `https://ethereal.email/message/${e.emailId}`,
+    previewUrl: `https://mail.google.com/mail/#all/${e.emailId}`,
   };
 };
 
@@ -63,7 +63,7 @@ beforeEach(async () => {
     sent.push(e);
     return {
       messageId: `<${e.emailId}@cadence.local>`,
-      previewUrl: `https://ethereal.email/message/${e.emailId}`,
+      previewUrl: `https://mail.google.com/mail/#all/${e.emailId}`,
     };
   };
 });
@@ -95,7 +95,7 @@ async function schedule(
 describe('send pipeline', () => {
   it('sends every email exactly once, on time, and records the outcome', async () => {
     const user = await seedUser(ctx);
-    await seedSenders(ctx, 3);
+    await seedSenders(ctx, user.id, 3);
     const t0 = Date.now();
     const c = await schedule(user.id, 4);
     worker = startWorker();
@@ -123,7 +123,7 @@ describe('send pipeline', () => {
 
   it('never sends twice even if the same email has two jobs', async () => {
     const user = await seedUser(ctx);
-    await seedSenders(ctx, 1);
+    await seedSenders(ctx, user.id, 1);
     const c = await schedule(user.id, 1);
     const [row] = await statuses(c.campaignId);
     // A second job for the same email under a different job ID (e.g. a bug or a manual re-add).
@@ -155,7 +155,7 @@ describe('send pipeline', () => {
 
   it('allows exactly one winner when many workers claim the same row', async () => {
     const user = await seedUser(ctx);
-    await seedSenders(ctx, 1);
+    await seedSenders(ctx, user.id, 1);
     const c = await schedule(user.id, 1, {
       startAt: new Date(Date.now() + 3_600_000).toISOString(),
     });
@@ -168,7 +168,7 @@ describe('send pipeline', () => {
 describe('rate limits and deferral', () => {
   it('defers overflow to the next hour in order, alerts once per sender, and never fails a job', async () => {
     const user = await seedUser(ctx);
-    const senderRows = await seedSenders(ctx, 3);
+    const senderRows = await seedSenders(ctx, user.id, 3);
     const c = await schedule(user.id, 9);
     worker = startWorker({ maxPerHourPerSender: 2 });
 
@@ -210,16 +210,31 @@ describe('rate limits and deferral', () => {
   });
 });
 
-describe('failures', () => {
-  it('retries an error that happened before DATA and then sends once', async () => {
+describe('per-sender limits', () => {
+  it("enforces each sender's own hourly limit under the server maximum", async () => {
     const user = await seedUser(ctx);
-    await seedSenders(ctx, 1);
+    await seedSenders(ctx, user.id, 1, { hourlyLimit: 2 });
+    const c = await schedule(user.id, 3);
+    worker = startWorker({ maxPerHourPerSender: 200 });
+    const rows = await waitFor(
+      () => statuses(c.campaignId),
+      (r) =>
+        r.filter((e) => e.status === 'sent').length === 2 &&
+        r.filter((e) => e.status === 'deferred').length === 1,
+    );
+    expect(rows[2]!.deferLimit).toBe(2);
+  });
+});
+
+describe('failures', () => {
+  it('retries an error where Gmail certainly did not accept the message, then sends once', async () => {
+    const user = await seedUser(ctx);
+    await seedSenders(ctx, user.id, 1);
     const c = await schedule(user.id, 1);
     let calls = 0;
     sendImpl = async (_s, e) => {
       calls++;
-      if (calls === 1)
-        throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNECTION' });
+      if (calls === 1) throw new GmailError('Couldn’t reach Gmail (ECONNREFUSED)', 'retryable');
       sent.push(e);
       return { messageId: 'm', previewUrl: null };
     };
@@ -233,14 +248,14 @@ describe('failures', () => {
     expect(row!.attempts).toBe(2);
   });
 
-  it('does not retry an ambiguous error during DATA', async () => {
+  it('does not retry an error where Gmail may have accepted the message', async () => {
     const user = await seedUser(ctx);
-    await seedSenders(ctx, 1);
+    await seedSenders(ctx, user.id, 1);
     const c = await schedule(user.id, 1);
     let calls = 0;
     sendImpl = async () => {
       calls++;
-      throw Object.assign(new Error('Timeout'), { code: 'ETIMEDOUT', command: 'DATA' });
+      throw new GmailError('Gmail returned 500', 'ambiguous');
     };
     worker = startWorker();
     const [row] = await waitFor(
@@ -248,16 +263,31 @@ describe('failures', () => {
       (r) => r[0]?.status === 'failed',
     );
     expect(calls).toBe(1);
-    expect(row!.error).toBe('ambiguous: Timeout');
+    expect(row!.error).toBe('ambiguous: Gmail returned 500');
     await waitFor(
       () => ctx.emailQueue.getFailedCount(),
       (n) => n === 1,
     );
   });
 
+  it("fails a disconnected sender's email without sending it from another account", async () => {
+    const user = await seedUser(ctx);
+    const [gone] = await seedSenders(ctx, user.id, 2);
+    const c = await schedule(user.id, 2);
+    await ctx.db.update(senders).set({ isActive: false }).where(eq(senders.id, gone!.id));
+    worker = startWorker();
+    const rows = await waitFor(
+      () => statuses(c.campaignId),
+      (r) => r.every((e) => e.status === 'sent' || e.status === 'failed'),
+    );
+    expect(rows.map((r) => r.status)).toEqual(['failed', 'sent']);
+    expect(rows[0]!.error).toBe('sender disconnected');
+    expect(sent).toHaveLength(1);
+  });
+
   it('marks an expired claim as interrupted instead of resending', async () => {
     const user = await seedUser(ctx);
-    await seedSenders(ctx, 1);
+    await seedSenders(ctx, user.id, 1);
     const c = await schedule(user.id, 1);
     const [row] = await statuses(c.campaignId);
     await ctx.db
@@ -275,7 +305,7 @@ describe('failures', () => {
 
   it('waits out a live lease instead of leaving the row stuck in sending', async () => {
     const user = await seedUser(ctx);
-    await seedSenders(ctx, 1);
+    await seedSenders(ctx, user.id, 1);
     const c = await schedule(user.id, 1);
     const [row] = await statuses(c.campaignId);
     await ctx.db
@@ -300,7 +330,7 @@ describe('failures', () => {
 describe('reconciler', () => {
   it('re-adds missing jobs, replaces stale failed jobs, and fails expired claims', async () => {
     const user = await seedUser(ctx);
-    await seedSenders(ctx, 1);
+    await seedSenders(ctx, user.id, 1);
     const later = new Date(Date.now() + 3_600_000).toISOString();
     const c = await schedule(user.id, 3, { startAt: later });
     const [a, b, d] = await statuses(c.campaignId);
@@ -372,7 +402,7 @@ describe('reconciler', () => {
 describe('campaign creation', () => {
   it('accepts 5,000 recipients in well under 3 seconds', async () => {
     const user = await seedUser(ctx);
-    await seedSenders(ctx, 3);
+    await seedSenders(ctx, user.id, 3);
     const t0 = performance.now();
     const c = await schedule(user.id, 5000, { hourlyLimit: 100 });
     const ms = performance.now() - t0;
@@ -391,7 +421,7 @@ describe('limit notifications', () => {
   it('frees the hour when Slack is not connected, so a reconnect alerts on the next hit', async () => {
     const { createNotifyProcessor } = await import('../src/jobs/notify.processor.js');
     const user = await seedUser(ctx);
-    const [sender] = await seedSenders(ctx, 1);
+    const [sender] = await seedSenders(ctx, user.id, 1);
     const hour = hourIndex(Date.now());
     const posted: string[] = [];
     let connected = false;

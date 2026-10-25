@@ -57,6 +57,11 @@ export interface EstimateInput {
   intervalMs: number;
   senderCount: number;
   maxPerHourPerSender: number;
+  /**
+   * Each sender's own hourly cap, by sender position. When given, it replaces `senderCount` and
+   * `maxPerHourPerSender` (senders are users' Gmail accounts, each with its own limit).
+   */
+  senderCaps?: readonly number[];
   minSendGapMs: number;
   /**
    * Sends already counted against each sender, keyed by sender position and then by hour
@@ -148,20 +153,24 @@ function before(x: SimEvent, y: SimEvent): boolean {
  * Worker concurrency and network latency make real times differ by a few seconds.
  */
 export function estimateFinish(input: EstimateInput): EstimateResult {
-  const { count, startMs, intervalMs, maxPerHourPerSender: cap, minSendGapMs: gap } = input;
-  const senderCount = Math.max(1, input.senderCount);
+  const { count, startMs, intervalMs, minSendGapMs: gap } = input;
+  const caps =
+    input.senderCaps && input.senderCaps.length > 0
+      ? input.senderCaps
+      : new Array<number>(Math.max(1, input.senderCount)).fill(input.maxPerHourPerSender);
+  const senderCount = caps.length;
   const plannedPerSenderPerHour = HOUR_MS / (intervalMs * senderCount);
-  const capacityPerHour = cap * senderCount;
+  const capacityPerHour = caps.reduce((sum, c) => sum + c, 0);
   const result: EstimateResult = {
     firstAtMs: null,
     finishAtMs: null,
     deferredCount: 0,
     plannedPerSenderPerHour,
     capacityPerHour,
-    overCapacity: plannedPerSenderPerHour > cap,
+    overCapacity: caps.some((c) => plannedPerSenderPerHour > c),
     sends: [],
   };
-  if (count <= 0 || cap <= 0) return result;
+  if (count <= 0 || caps.some((c) => c <= 0)) return result;
 
   const nextFree = new Array<number>(senderCount).fill(0);
   const usage = Array.from({ length: senderCount }, (_, s) => {
@@ -188,6 +197,7 @@ export function estimateFinish(input: EstimateInput): EstimateResult {
     const slot = Math.max(ev.at, nextFree[s]!);
     const hour = hourIndex(slot);
     const used = usage[s]!.get(hour) ?? 0;
+    const cap = caps[s]!;
     if (used >= cap) {
       const nextHour = hour + 1;
       const pos = (deferPositions[s]!.get(nextHour) ?? 0) + 1;

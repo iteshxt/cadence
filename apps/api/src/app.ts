@@ -12,8 +12,11 @@ import { basicAuth } from './middleware/basicAuth.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 import { campaignsRouter } from './routes/campaigns.js';
 import { emailsRouter } from './routes/emails.js';
+import { gmailCallbackRouter, gmailRouter } from './routes/gmail.js';
 import { miscRouter } from './routes/misc.js';
 import { searchRouter } from './routes/search.js';
+import { sendersRouter } from './routes/senders.js';
+import { settingsRouter } from './routes/settings.js';
 import { slackCallbackRouter, slackRouter } from './routes/slack.js';
 
 export interface AppOptions {
@@ -85,14 +88,15 @@ export function createApp(ctx: Context, opts: AppOptions = {}): Express {
     cors({
       origin: ctx.env.WEB_URL.replace(/\/+$/, ''),
       allowedHeaders: ['authorization', 'content-type', 'idempotency-key'],
-      methods: ['GET', 'POST', 'DELETE'],
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
       maxAge: 600,
     }),
   );
   app.use(express.json({ limit: '1mb' }));
 
-  // Public: Slack redirects here without a session; the signed state identifies the user.
+  // Public: Slack and Google redirect here without a session; the signed state identifies the user.
   app.use('/api/integrations/slack', slackCallbackRouter(ctx));
+  app.use('/api/integrations/gmail', gmailCallbackRouter(ctx));
 
   const auth = createAuthMiddleware({
     verify: opts.verify ?? supabaseVerifier(ctx.env.SUPABASE_URL),
@@ -103,6 +107,9 @@ export function createApp(ctx: Context, opts: AppOptions = {}): Express {
   app.use('/api/campaigns', campaignsRouter(ctx));
   app.use('/api/emails', emailsRouter(ctx));
   app.use('/api/search', searchRouter(ctx));
+  app.use('/api/senders', sendersRouter(ctx));
+  app.use('/api/settings', settingsRouter(ctx));
+  app.use('/api/integrations/gmail', gmailRouter(ctx));
   app.use('/api/integrations/slack', slackRouter(ctx));
 
   app.use(notFoundHandler);

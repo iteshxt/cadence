@@ -11,7 +11,9 @@ import { createEmailsRepo } from './services/emails.repo.js';
 import { createRateLimiter } from './services/ratelimit.service.js';
 import { createScheduler } from './services/scheduler.service.js';
 import { createSearch, createSearchClient } from './services/search.service.js';
+import { createGmail } from './services/gmail.service.js';
 import { createSendersService } from './services/senders.service.js';
+import { createSettingsService } from './services/settings.service.js';
 import { createSlack } from './services/slack.service.js';
 import { createTimeline } from './services/timeline.service.js';
 
@@ -29,6 +31,7 @@ export function createContext(env: Env, log: Logger = createLogger(env.LOG_LEVEL
   const repo = createEmailsRepo(db);
   const rateLimiter = createRateLimiter(redis);
   const cap = env.MAX_EMAILS_PER_HOUR_PER_SENDER;
+  const gmail = createGmail({ db, crypto, env, log: log.child({ component: 'gmail' }) });
 
   const config: AppConfig = {
     workerConcurrency: env.WORKER_CONCURRENCY,
@@ -53,8 +56,10 @@ export function createContext(env: Env, log: Logger = createLogger(env.LOG_LEVEL
     rateLimiter,
     scheduler: createScheduler({ db, env, emailQueue, repo, search, rateLimiter, log }),
     slack: createSlack({ db, crypto, env, log }),
+    gmail,
     timeline: createTimeline({ db, rateLimiter, maxPerHourPerSender: cap }),
-    senders: createSendersService({ db, rateLimiter, cap }),
+    senders: createSendersService({ db, rateLimiter, gmail, maxCap: cap }),
+    settings: createSettingsService({ db }),
 
     async close() {
       await ctx.scheduler.settle();

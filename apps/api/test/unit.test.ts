@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createCrypto } from '../src/lib/crypto.js';
 import { decodeCursor, encodeCursor } from '../src/lib/cursor.js';
 import { userFromClaims } from '../src/middleware/auth.js';
-import { classifySmtpError } from '../src/services/mailer.service.js';
+import { classifySendError, GmailError } from '../src/services/gmail.service.js';
 import { limitMessage } from '../src/services/slack.service.js';
 import { pickBucketMs } from '../src/services/timeline.service.js';
 
@@ -30,22 +30,16 @@ describe('crypto', () => {
   });
 });
 
-describe('classifySmtpError', () => {
+describe('classifySendError', () => {
   it.each([
-    [{ code: 'ECONNECTION' }, 'retryable'],
-    [{ code: 'EDNS' }, 'retryable'],
-    [{ code: 'EAUTH', command: 'AUTH PLAIN', responseCode: 454 }, 'retryable'],
-    [{ code: 'EENVELOPE', command: 'RCPT TO', responseCode: 451 }, 'retryable'],
-    [{ code: 'EENVELOPE', command: 'MAIL FROM' }, 'retryable'],
-    [{ code: 'EAUTH', command: 'AUTH PLAIN', responseCode: 535 }, 'permanent'],
-    [{ code: 'EENVELOPE', command: 'RCPT TO', responseCode: 550 }, 'permanent'],
-    [{ code: 'EMESSAGE', command: 'DATA', responseCode: 451 }, 'ambiguous'],
-    [{ code: 'ETIMEDOUT', command: 'DATA' }, 'ambiguous'],
-    [{ code: 'ESOCKET' }, 'ambiguous'],
-    [{ code: 'ETIMEDOUT' }, 'ambiguous'],
+    [new GmailError('x', 'retryable'), 'retryable'],
+    [new GmailError('x', 'permanent'), 'permanent'],
+    [new GmailError('x', 'ambiguous'), 'ambiguous'],
+    [Object.assign(new Error('fetch failed'), { cause: { code: 'ECONNREFUSED' } }), 'ambiguous'],
     [new Error('something odd'), 'ambiguous'],
-  ])('%j → %s', (err, kind) => {
-    expect(classifySmtpError(err)).toBe(kind);
+    ['not even an error', 'ambiguous'],
+  ])('%s → %s', (err, kind) => {
+    expect(classifySendError(err)).toBe(kind);
   });
 });
 

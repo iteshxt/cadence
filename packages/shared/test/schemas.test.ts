@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { CreateCampaignSchema, TimelineQuerySchema } from '../src/schemas.js';
+import {
+  CreateCampaignSchema,
+  TimelineQuerySchema,
+  UpdateSenderSchema,
+  UserSettingsSchema,
+} from '../src/schemas.js';
 import { isValidEmail, normalizeEmail } from '../src/email.js';
 
 const valid = {
@@ -66,6 +71,34 @@ describe('TimelineQuerySchema', () => {
     expect(
       TimelineQuerySchema.safeParse({ from: '2026-10-25T01:00:00Z', to: '2026-10-25T00:00:00Z' })
         .success,
+    ).toBe(false);
+  });
+});
+
+describe('UpdateSenderSchema', () => {
+  it('trims text and turns an empty display name into null', () => {
+    expect(UpdateSenderSchema.parse({ label: '  Sales  ', displayName: '  ' })).toEqual({
+      label: 'Sales',
+      displayName: null,
+    });
+  });
+  it('rejects an empty label, a zero limit, and an empty update', () => {
+    expect(UpdateSenderSchema.safeParse({ label: '   ' }).success).toBe(false);
+    expect(UpdateSenderSchema.safeParse({ hourlyLimit: 0 }).success).toBe(false);
+    expect(UpdateSenderSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('UserSettingsSchema', () => {
+  it("uses the campaign fields' bounds", () => {
+    expect(
+      UserSettingsSchema.safeParse({ defaultDelaySeconds: 2, defaultHourlyLimit: 100 }).success,
+    ).toBe(true);
+    expect(
+      UserSettingsSchema.safeParse({ defaultDelaySeconds: 0, defaultHourlyLimit: 100 }).success,
+    ).toBe(false);
+    expect(
+      UserSettingsSchema.safeParse({ defaultDelaySeconds: 2, defaultHourlyLimit: 3601 }).success,
     ).toBe(false);
   });
 });

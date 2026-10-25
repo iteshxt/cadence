@@ -50,16 +50,24 @@ export async function seedUser(
   return { id, email };
 }
 
-export async function seedSenders(ctx: Context, n = 3) {
+/** Connected Gmail senders for a user, labelled "Sender A", "Sender B", … */
+export async function seedSenders(
+  ctx: Context,
+  userId: string,
+  n = 3,
+  values: Partial<typeof senders.$inferInsert> = {},
+) {
   const rows = [];
   for (let i = 0; i < n; i++) {
     const [row] = await ctx.db
       .insert(senders)
       .values({
+        userId,
         label: `Sender ${String.fromCharCode(65 + i)}`,
-        fromEmail: `sender${i}-${randomUUID().slice(0, 6)}@ethereal.email`,
-        smtpUser: `sender${i}@ethereal.email`,
-        smtpPassEnc: ctx.crypto.encrypt('secret'),
+        fromEmail: `sender${i}-${randomUUID().slice(0, 6)}@gmail.com`,
+        hourlyLimit: 200,
+        refreshTokenEnc: ctx.crypto.encrypt('refresh-token'),
+        ...values,
       })
       .returning();
     rows.push(row!);

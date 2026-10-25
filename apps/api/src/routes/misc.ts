@@ -4,7 +4,7 @@ import type { Context } from '../context.js';
 import { currentUser } from '../middleware/auth.js';
 import { parse } from '../middleware/validate.js';
 
-/** Small read-only routes: /me, /config, /senders, /stats, /timeline. */
+/** Small read-only routes: /me, /config, /stats, /timeline. */
 export function miscRouter(ctx: Context): Router {
   const router = Router();
 
@@ -16,10 +16,6 @@ export function miscRouter(ctx: Context): Router {
 
   router.get('/config', (_req, res) => {
     res.json(ctx.config);
-  });
-
-  router.get('/senders', async (_req, res) => {
-    res.json({ items: await ctx.senders.list() });
   });
 
   router.get('/stats', async (req, res) => {

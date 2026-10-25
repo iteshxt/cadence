@@ -18,6 +18,7 @@ import { sendJobOptions, type EmailQueue } from '../queues/emailQueue.js';
 import type { EmailsRepo } from './emails.repo.js';
 import type { RateLimiter } from './ratelimit.service.js';
 import type { Search } from './search.service.js';
+import { senderCap } from './senders.service.js';
 
 const INSERT_CHUNK = 1000;
 const ENQUEUE_CHUNK = 500;
@@ -44,7 +45,7 @@ export function createScheduler(deps: SchedulerDeps) {
 
   async function summarize(
     campaign: CampaignRow,
-    senderCount: number,
+    senderCaps: number[],
   ): Promise<CreateCampaignResponse> {
     const [agg] = await deps.db
       .select({ n: count(), first: min(emails.scheduledAt), last: max(emails.scheduledAt) })
@@ -54,8 +55,9 @@ export function createScheduler(deps: SchedulerDeps) {
       count: campaign.totalCount,
       startMs: campaign.startAt.getTime(),
       intervalMs: campaign.intervalMs,
-      senderCount,
+      senderCount: senderCaps.length,
       maxPerHourPerSender: deps.env.MAX_EMAILS_PER_HOUR_PER_SENDER,
+      senderCaps,
       minSendGapMs: deps.env.MIN_SEND_GAP_MS,
     });
     const first = agg?.first ?? campaign.startAt;
@@ -68,12 +70,21 @@ export function createScheduler(deps: SchedulerDeps) {
     };
   }
 
-  async function activeSenders(requested?: string[]) {
+  const capsOf = (rows: { hourlyLimit: number }[]) =>
+    rows.map((r) => senderCap(r, deps.env.MAX_EMAILS_PER_HOUR_PER_SENDER));
+
+  /** The user's senders that can send right now: active, and Google still accepts their access. */
+  async function activeSenders(userId: string, requested?: string[]) {
     const rows = await deps.db
       .select()
       .from(senders)
       .where(
-        and(eq(senders.isActive, true), requested ? inArray(senders.id, requested) : undefined),
+        and(
+          eq(senders.userId, userId),
+          eq(senders.isActive, true),
+          eq(senders.needsReconnect, false),
+          requested ? inArray(senders.id, requested) : undefined,
+        ),
       )
       .orderBy(asc(senders.label), asc(senders.id));
     if (requested && rows.length !== new Set(requested).size) {
@@ -90,7 +101,7 @@ export function createScheduler(deps: SchedulerDeps) {
       throw new AppError(
         422,
         'NO_SENDERS',
-        'No sender accounts are set up. Run `pnpm --filter api seed:senders`.',
+        'Connect a Gmail account in Settings before scheduling.',
       );
     }
     return rows;
@@ -113,8 +124,8 @@ export function createScheduler(deps: SchedulerDeps) {
           .from(campaigns)
           .where(and(eq(campaigns.userId, userId), eq(campaigns.idempotencyKey, idempotencyKey)));
         if (existing) {
-          const senderCount = (await activeSenders()).length;
-          return { kind: 'duplicate', body: await summarize(existing, senderCount) };
+          const caps = capsOf(await activeSenders(userId).catch(() => []));
+          return { kind: 'duplicate', body: await summarize(existing, caps) };
         }
       }
 
@@ -127,7 +138,7 @@ export function createScheduler(deps: SchedulerDeps) {
           'Couldn’t schedule: the start time is more than 5 minutes in the past.',
         );
       }
-      const chosen = await activeSenders(input.senderIds);
+      const chosen = await activeSenders(userId, input.senderIds);
       const intervalMs = campaignIntervalMs(input.delaySeconds, input.hourlyLimit);
       const recipients = input.recipients;
 
@@ -179,7 +190,7 @@ export function createScheduler(deps: SchedulerDeps) {
           .select()
           .from(campaigns)
           .where(and(eq(campaigns.userId, userId), eq(campaigns.idempotencyKey, idempotencyKey!)));
-        return { kind: 'duplicate', body: await summarize(existing!, chosen.length) };
+        return { kind: 'duplicate', body: await summarize(existing!, capsOf(chosen)) };
       }
 
       // After commit. If the process dies here, the reconciler enqueues these on next boot (§7.1).
@@ -215,6 +226,7 @@ export function createScheduler(deps: SchedulerDeps) {
         intervalMs,
         senderCount: chosen.length,
         maxPerHourPerSender: deps.env.MAX_EMAILS_PER_HOUR_PER_SENDER,
+        senderCaps: capsOf(chosen),
         minSendGapMs: deps.env.MIN_SEND_GAP_MS,
         existingUsage: chosen.map((s) => ({ [hourIndex(start.startMs)]: usage.get(s.id) ?? 0 })),
       });
