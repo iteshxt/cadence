@@ -29,7 +29,7 @@
 
 ## 3. Color
 
-All colors are CSS variables on `:root`, remapped under `prefers-color-scheme: dark` (unless `data-theme="light"`) and under `[data-theme="dark"]`. Tailwind v4 exposes them through `@theme` (§12). The neutrals lean slightly green-grey so they sit in harmony with the teal accent; none of them are stock Tailwind values.
+All colors are CSS variables on `:root`, remapped under `prefers-color-scheme: dark` (unless `data-theme="light"`) and under `[data-theme="dark"]`. **Light is the default:** the root element sets `data-theme="light"`, so the app stays light regardless of the OS setting; the dark values are kept for a future theme switch. Tailwind v4 exposes them through `@theme` (§12). The neutrals lean slightly green-grey so they sit in harmony with the teal accent; none of them are stock Tailwind values.
 
 ### 3.1 Neutrals and accent
 
@@ -213,7 +213,7 @@ Replaces the earlier 640 px modal. Opened by the Compose button or `?compose=1`.
 | **Google button** | Secondary style at 44 px, official "G" mark, label "Continue with Google", full width in the login panel. |
 | **Input / Textarea** | 36 px, 6 px radius, 1 px `--control` border, `--surface` fill. Focus: `--signal` border plus the focus ring. Error: `--failed` border and a `caption` in `--failed` below. Label above with a 6 px gap; helper text in `caption`/`--ink-3`. |
 | **Number field** | Input with a suffix unit in `--ink-3` ("seconds", "emails per hour"). Arrow keys step the value. The pacing fields share one helper caption that states the result ("1 email every 36 seconds"). When the plan exceeds what the senders can send, a second caption in `--deferred`: "Your senders can send 600 emails an hour in total. The rest will move to the next hour." |
-| **Date and time** | Popover calendar plus a time input, with the timezone as a caption ("Asia/Kolkata, UTC+05:30"). |
+| **Date and time** | Native date and time inputs (the browser's own picker, which is accessible and familiar on every platform), with the timezone as a caption ("Asia/Kolkata, UTC+05:30"). Disabled while **Send now** is on. |
 | **Dropzone** | 120 px, dashed 1 px `--control` border, 10 px radius, upload icon, "Drop a CSV or TXT file, or browse", caption "Up to 2 MB and 5,000 recipients". Drag-over: `--signal` border, `--signal-soft` fill. Once parsed: a file chip (icon, name, size, remove button) and a result line: "1,240 emails ready" in `--ink` weight 600, then "Removed 12 duplicates and 3 invalid addresses" in `--ink-3`. Results are announced with `aria-live="polite"`. |
 | **Sender chips** | 32 px toggles, 6 px radius, 1 px `--control` border. Selected: `--signal-soft` fill, `--signal` text, check icon. |
 | **Switch** | 20 × 36 px track, `--control` off, `--signal` on. |
@@ -241,40 +241,35 @@ Replaces the earlier 640 px modal. Opened by the Compose button or `?compose=1`.
 
 ### 8.1 Landing (`/`)
 
-Left-aligned throughout, no centered stack. White `--surface` page.
+Left-aligned throughout, no centered stack. The page alternates `--canvas` and `--surface` bands so sections read as distinct without decoration.
 
 ```
-┌ nav: [mark cadence]                                         [Sign in] ┐
-│                                                                       │
-│  Thousands of emails,             ┌ pace strip demo ───────────────┐ │
-│  sent at the pace you set.        │ Sender A ▏▏▏▏▏▏▏▏│▏▏▏▏          │ │
-│                                   │ Sender B ▏▏▏▏▏▏▏▏│▏▏▏▏▏ (amber)  │ │
-│  Schedule a campaign, choose      │ Sender C ▏▏▏▏▏▏▏▏│▏▏▏           │ │
-│  how fast it goes, and Cadence    │          2 PM     3 PM          │ │
-│  sends every email once, on       └────────────────────────────────┘ │
-│  time, within every limit.                                            │
-│  [Continue with Google]  [View on GitHub]                             │
-│                                                                       │
-│  How a campaign runs                                                  │
-│  1 Upload recipients   2 Set the pace   3 Watch it send               │  a real sequence, so numbered
-│                                                                       │
-│  What happens when…                                                   │
-│  The server restarts mid-campaign   Overdue emails send once.         │
-│                                     The rest keep their times.        │
-│  A sender reaches its hourly cap    Extra emails move to the next     │
-│                                     hour, and Slack tells you.        │
-│  You click Schedule twice           You get one campaign.             │
-│  A send fails                       It is retried only if it          │
-│                                     can't cause a duplicate.          │
-│                                                                       │
-└ footer: Cadence  Docs  GitHub     Built with Next.js, Express, BullMQ, Redis, Postgres, Elasticsearch ┘
+┌ header (sticky): [mark cadence]  How it works  Reliability         [GitHub] [Sign in] ┐
+│ hero band (--canvas)                                                                 │
+│  Thousands of emails,             ┌ live board (--surface, shadow-float) ──────────┐ │
+│  sent at the pace you set.        │ Q4 outreach                         ● Sending   │ │
+│                                   │ pace strip: Sender A/B/C, now-line moving       │ │
+│  Schedule a campaign, …           │ Sent 13 of 27   Moved to 3 PM 1   Next 2:31 PM  │ │
+│  [Continue with Google] [GitHub]  └─────────────────────────────────────────────────┘ │
+│  Free demo. Mail goes to Ethereal…                                                   │
+├ How a campaign runs (--surface) ─────────────────────────────────────────────────────┤
+│  [upload UI piece]       [pacing fields piece]     [timetable rows piece]            │
+│  1 Upload recipients     2 Set the pace            3 Watch it send                   │
+├ What happens when… (--canvas) ───────────────────────────────────────────────────────┤
+│  one panel of rows: situation | outcome | proof (status mark + note)                 │
+├ closing call to action (--surface) ──────────────────────────────────────────────────┤
+│  Schedule your first campaign in a minute.         [Continue with Google] [GitHub]   │
+└ footer (--canvas): lockup, tech line, links ─────────────────────────────────────────┘
 ```
 
-- **Hero:** headline in `display`, body in `body-lg`, two lg buttons (Google is secondary-styled per §7.6, GitHub is ghost). The pace strip demo sits to the right on desktop and below the text under 1024 px.
-- **The one orchestrated moment:** on load, the demo strip plays once over about 6 seconds: ticks fill in left to right, Sender B reaches its cap, and its remaining ticks slide into the next hour in `--deferred-mark`. It then holds still. A small ghost "Play again" button replays it. Under reduced motion, the final state is shown immediately.
-- **"What happens when…":** a two-column definition list (`<dl>`): the situation in `section` style on the left, the outcome in `body-lg`/`--ink-2` on the right, hairlines between items. These are the PRD's acceptance criteria, written for users.
-- **No** product screenshot, glow, dot grid, feature-card grid, or separate tech strip section.
-- Sections have 96 px vertical padding (64 px on mobile).
+- **Header:** sticky; transparent over the hero, `--surface` with a bottom hairline once the page scrolls. Section anchors on desktop, a GitHub icon button, and **Sign in** as a small secondary button.
+- **Live board:** the one showcased, floating element on the page, so it is the only resting element allowed `--shadow-float`. A header row (campaign name and a `--signal-soft` status chip, "Sending" or "Finished"), the pace strip, and three counters (Sent, Moved to the next hour, Next send) that update with the strip.
+- **The one orchestrated moment, on a loop:** the board plays a scripted campaign over about 7 seconds (ticks fill in, Sender B reaches its cap, its remaining ticks slide into the next hour), holds the finished state for about 2.5 seconds, and plays again. It pauses while off screen or while the tab is hidden. Under reduced motion it shows the finished state, still.
+- **How a campaign runs:** each step pairs a small, static piece of the real interface (file chip and result line, pacing fields with the computed interval, timetable rows with status marks) with a numbered title and one sentence. The steps are a real sequence, so they are numbered; the numerals are `--signal`.
+- **What happens when…:** one panel of hairline-separated rows: the situation in `section` style, the outcome in `body-lg`/`--ink-2`, and a proof cell with a status mark and a caption ("Sent, 1 attempt"). These are the PRD's acceptance criteria, written for users.
+- **Closing call to action:** one line of title, one line of body, and the same two hero buttons.
+- **No** product screenshot, glow, dot grid, feature-card grid, eyebrow labels, or separate tech strip section.
+- Sections have 96 px of vertical padding (64 px on mobile).
 
 ### 8.2 Login (`/login`)
 

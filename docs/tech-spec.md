@@ -72,63 +72,69 @@
 ```
 cadence/
 ├─ apps/
-│  ├─ web/                       # Next.js
+│  ├─ web/                       # Next.js 16 (Vercel)
 │  │  ├─ app/
 │  │  │  ├─ (marketing)/page.tsx           # /
-│  │  │  ├─ login/page.tsx                 # /login
+│  │  │  ├─ login/{page,login-panel}.tsx   # /login
 │  │  │  ├─ auth/callback/route.ts         # OAuth code exchange
 │  │  │  ├─ dashboard/
-│  │  │  │  ├─ layout.tsx                  # header, tabs, auth guard
+│  │  │  │  ├─ layout.tsx                  # header, compose panel, auth check
 │  │  │  │  ├─ page.tsx                    # redirect → scheduled
-│  │  │  │  ├─ scheduled/page.tsx
-│  │  │  │  ├─ sent/page.tsx
-│  │  │  │  ├─ search/page.tsx
-│  │  │  │  └─ settings/page.tsx
+│  │  │  │  ├─ scheduled/ · sent/ · search/ · settings/
+│  │  │  ├─ globals.css                    # design tokens (design.md §12)
 │  │  │  └─ not-found.tsx
 │  │  ├─ components/
-│  │  │  ├─ ui/                  # Button, Input, Table, Badge, Dialog… (shadcn)
-│  │  │  ├─ layout/              # AppHeader (nav + counts), UserMenu
-│  │  │  ├─ emails/              # EmailTable (hour groups), StatusMark, EmptyState
-│  │  │  ├─ pace/                # PaceStrip, Readouts (design.md §7.1–7.2)
-│  │  │  ├─ compose/             # ComposePanel, RecipientsDropzone, PacingFields, ComposePreview
-│  │  │  └─ settings/            # SlackCard, SendersCard
+│  │  │  ├─ ui/                  # Button, Input, Field, Tooltip, Segmented, Switch, Skeleton, ErrorBanner
+│  │  │  ├─ brand/               # Mark, Logo, third-party marks (Google, Slack, GitHub)
+│  │  │  ├─ layout/              # AppHeader (nav + counts, search, user menu)
+│  │  │  ├─ emails/              # EmailView, EmailTable (hour groups), StatusMark, SearchView
+│  │  │  ├─ pace/                # PaceStrip, LiveStrip, Readouts (design.md §7.1–7.2)
+│  │  │  ├─ compose/             # ComposePanel, RecipientsDropzone, SenderChips, ComposePreview
+│  │  │  ├─ settings/            # Slack, Senders (usage meters), Limits, Queue sections
+│  │  │  └─ landing/             # HeroStrip (scripted demo)
 │  │  ├─ lib/
 │  │  │  ├─ supabase/{client,server,proxy}.ts
-│  │  │  ├─ api.ts               # typed fetch wrapper (adds Bearer token)
-│  │  │  ├─ csv.ts               # parse + dedupe + validate leads
-│  │  │  └─ format.ts            # dates, numbers
-│  │  ├─ hooks/                  # useEmails, useStats, useTimeline, useSlackStatus…
+│  │  │  ├─ api.ts               # typed fetch wrapper (adds Bearer token, ApiError)
+│  │  │  ├─ csv.ts               # parse + dedupe + validate recipients
+│  │  │  ├─ format.ts            # dates, numbers, hour windows, timezones
+│  │  │  └─ env.ts               # public config, safe post-login redirects
+│  │  ├─ hooks/{queries,use-pager}.ts
 │  │  └─ proxy.ts                # refresh session, protect /dashboard (Next.js 16 name for middleware)
-│  └─ api/                       # Express + worker
+│  └─ api/                       # Express + worker (one image, two commands)
 │     ├─ src/
-│     │  ├─ server.ts            # HTTP entry
-│     │  ├─ worker.ts            # Worker entry
-│     │  ├─ config/env.ts        # Zod-validated env
-│     │  ├─ db/{schema.ts,client.ts,migrations/}
-│     │  ├─ middleware/{auth.ts,error.ts,validate.ts}
-│     │  ├─ routes/{campaigns,emails,search,senders,stats,slack}.ts
+│     │  ├─ server.ts · worker.ts            # process entries
+│     │  ├─ app.ts                           # Express app (routes, Bull Board, errors)
+│     │  ├─ context.ts                       # wires db, redis, queues, services
+│     │  ├─ config/env.ts                    # Zod-validated env
+│     │  ├─ db/{schema,client,migrate}.ts + migrations/
+│     │  ├─ middleware/{auth,error,validate,basicAuth}.ts
+│     │  ├─ routes/{campaigns,emails,search,slack,misc}.ts   # misc: me, config, senders, stats, timeline
 │     │  ├─ services/
 │     │  │  ├─ scheduler.service.ts    # create campaign → rows → jobs
-│     │  │  ├─ mailer.service.ts       # nodemailer transports per sender
-│     │  │  ├─ ratelimit.service.ts    # Lua scripts
+│     │  │  ├─ emails.repo.ts          # every read/write of `emails` (API, worker, reconciler)
+│     │  │  ├─ mailer.service.ts       # nodemailer transports per sender, SMTP error classes
+│     │  │  ├─ ratelimit.service.ts    # Lua slot reservation, deferral and alert bookkeeping
 │     │  │  ├─ search.service.ts       # ES index/query
-│     │  │  ├─ slack.service.ts        # OAuth + notify
+│     │  │  ├─ slack.service.ts        # OAuth + webhook posts
+│     │  │  ├─ timeline.service.ts     # pace strip data
+│     │  │  ├─ senders.service.ts      # senders + current-hour usage
 │     │  │  └─ reconciler.service.ts   # boot-time repair
 │     │  ├─ queues/{connection,emailQueue,notifyQueue}.ts
 │     │  ├─ jobs/{sendEmail.processor,notify.processor}.ts
-│     │  ├─ lua/{reserve_send.lua}
-│     │  └─ lib/{crypto,logger,time}.ts
-│     ├─ scripts/{seed-senders.ts,reindex.ts,load-test.ts}
-│     └─ test/
+│     │  ├─ lua/reserve_send.lua
+│     │  └─ lib/{crypto,logger,errors,cursor}.ts
+│     ├─ scripts/{seed-senders,reindex,load-test}.ts
+│     ├─ test/                   # vitest + supertest + testcontainers
+│     └─ Dockerfile
 ├─ packages/
-│  └─ shared/                    # Zod schemas, DTO types, enums, pacing math
-│     └─ src/{schemas.ts,types.ts,constants.ts,pacing.ts}
+│  └─ shared/                    # Zod schemas, DTO types, constants, pacing math
+│     └─ src/{schemas,types,constants,email,pacing}.ts
 ├─ deploy/
-│  ├─ docker-compose.prod.yml    # api + worker + redis + elasticsearch + caddy (on the VM)
+│  ├─ docker-compose.prod.yml    # redis + elasticsearch + migrate + api + worker + caddy (on the VM)
 │  └─ Caddyfile                  # automatic HTTPS for the API
 ├─ docs/
 │  └─ prd.md · tech-spec.md · design.md
-├─ docker-compose.yml            # local: redis + elasticsearch
+├─ docker-compose.yml            # local: redis + elasticsearch (+ postgres with --profile localdb)
 ├─ turbo.json · pnpm-workspace.yaml · .env.example
 ├─ CLAUDE.md · README.md
 ```
@@ -541,11 +547,11 @@ When the result is `LIMIT`:
 
 1. `nextWindowStart = (hour + 1) × 3_600_000`, using the `hour` the script returned (the slot's window).
 2. Take an ordered position in that window: `pos = INCR defer:{scope}:{scopeId}:{hour + 1}`, with a 2-hour TTL.
-3. `newTime = nextWindowStart + (pos − 1) × spacing`. `spacing` is `MIN_SEND_GAP_MS` for the `sender` scope and `campaign.interval_ms` for the `campaign` scope. Collisions with emails already planned for that window are fine, because the slot reservation (§9.2) spaces them out anyway.
+3. `newTime = deferTargetMs(hour + 1, pos, cap, spacing)` from `packages/shared/src/pacing.ts`. `spacing` is `MIN_SEND_GAP_MS` for the `sender` scope and `campaign.interval_ms` for the `campaign` scope; `cap` is that scope's hourly cap. A window holds `perWindow = min(cap, floor(1 h / spacing))` positions, so position `pos` goes to window `hour + 1 + floor((pos − 1) / perWindow)` at offset `((pos − 1) mod perWindow) × spacing`. Overflow that can't fit in the next hour goes straight to the right later hour, in order, instead of being deferred again every hour (with a cap of 5, that churn would requeue thousands of jobs per hour). Collisions with emails already planned for a window are fine: the slot reservation (§9.2) spaces them out, and anything still over the cap is deferred again by the same rule.
 4. Update the row: `status='deferred'`, `next_attempt_at=newTime`, `defer_scope`, `defer_limit`. Clear `job.data.slotAt`.
 5. Call `job.moveToDelayed(newTime, token)` and throw `DelayedError`. Attempts are **not** consumed, and the job is never failed.
 6. **Audit:** insert a `rate_limit_events` row the first time each `(scope, scopeId, window)` is hit (guarded by the same `SET … NX` pattern).
-7. **Notify (sender scope only):** `SET slack:notified:{userId}:{senderId}:{hour} 1 NX EX 7200`. Only if that succeeds, enqueue a job on the `notifications` queue with `{ userId, senderId, hour }`. Hitting a campaign limit doesn't page anyone, because it is the user's own pacing working as configured.
+7. **Notify (sender scope only):** `SET slack:notified:{userId}:{senderId}:{hour} 1 NX EX 7200`. Only if that succeeds, enqueue a job on the `notifications` queue with `{ userId, senderId, hour, cap }`. Hitting a campaign limit doesn't page anyone, because it is the user's own pacing working as configured. If the notify job finds no Slack connection (or a dead webhook), it deletes the key again, so the next limit hit in the same hour alerts once the user reconnects (PRD acceptance 6).
 
 Jobs reach the limit in roughly their planned order (BullMQ promotes delayed jobs by timestamp; with concurrency > 1, jobs due within the same few milliseconds may swap). The positions keep that order in the next window. If the next window also overflows, the same logic pushes the job forward again.
 
@@ -626,6 +632,7 @@ The script `pnpm load-test --count 1000 --start now` makes this reproducible.
 
 ```bash
 docker compose up -d                  # redis (AOF, noeviction) + elasticsearch (single-node, security off)
+                                      # add --profile localdb for a local Postgres instead of Supabase
 pnpm i
 pnpm --filter api db:migrate
 pnpm --filter api seed:senders        # creates 3 Ethereal accounts via nodemailer.createTestAccount()
@@ -685,7 +692,7 @@ BULL_BOARD_USER=admin
 BULL_BOARD_PASS=change-me
 # deploy (VM only)
 API_DOMAIN=cadence-api.duckdns.org
-DUCKDNS_TOKEN=
+ACME_EMAIL=you@example.com            # Let's Encrypt contact for Caddy
 # web
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=           # or the legacy anon key
@@ -694,12 +701,18 @@ NEXT_PUBLIC_API_URL=http://localhost:4000       # prod: https://cadence-api.duck
 
 ## 14. Testing strategy
 
+`pnpm test` runs every suite through Turborepo. API integration tests start throwaway Postgres and Redis containers with testcontainers (or reuse `TEST_DATABASE_URL` / `TEST_REDIS_URL`); the Elasticsearch suite runs when `TEST_ELASTICSEARCH_URL` is set.
+
 | Level | What |
 |---|---|
-| Unit | CSV parser (dedupe, header detection, invalid entries). `intervalMs` and schedule math. `estimateFinish()` against the §9.5 example. Start-time grace. Window index and next-window computation. SMTP error classification (retryable, ambiguous, or permanent). Encryption round-trip. |
-| Integration (Redis testcontainer) | Lua reservation under 50 parallel calls never exceeds the limit, and it hands out distinct slots at least `minGap` apart. Deferral positions are monotonic. Duplicate `addBulk` with the same job ID produces one job. The reconciler replaces a stale `failed` job and re-adds a missing one. |
-| Integration (API) | Campaign creation with an `Idempotency-Key` repeated twice produces one campaign. Authorization scoping: user A cannot read user B's emails. |
-| End-to-end, manual | The restart test, the rate limit plus Slack, and disconnect/reconnect, scripted in the README. |
+| Unit (shared) | `campaignIntervalMs`, hour windows, start-time grace, `deferTargetMs`, and `estimateFinish()` against the §9.5 example, acceptance test 5, other campaigns' usage, and the 5,000-recipient worst case (< 100 ms). Schema rules (blank text, dedupe, bounds). |
+| Unit (web) | CSV/TXT parsing (email-column detection, cell scanning, dedupe, BOM, invalid counts). Formatting (hour windows in half-hour zones, relative times, durations, timezone labels). |
+| Unit (API) | SMTP error classification (retryable, ambiguous, permanent). AES-256-GCM round trip and tamper detection. JWT claim mapping. Cursors. Slack copy. Timeline bucket sizes. |
+| Integration (Redis) | Lua reservation under 50 parallel calls never exceeds the cap, hands out distinct slots exactly `minGap` apart, charges the slot's hour, reports the right scope, and leaves the gap pointer alone on LIMIT. Deferral positions are monotonic. One alert per user, sender, and hour. Duplicate `addBulk` with the same job ID produces one job. |
+| Integration (worker) | A real BullMQ worker with a fake SMTP send: exactly-once sends on time; two jobs for one email still send once; ten concurrent claims have one winner; overflow deferred to the next hour in planned order with one alert per sender and no failed jobs; a pre-DATA error is retried once; an ambiguous DATA error is not retried; expired and live leases end as `interrupted` without resending; the reconciler re-adds lost jobs, replaces stale failed jobs, settles expired claims, and is idempotent and locked; 5,000 recipients scheduled in well under 3 seconds; a Slack alert released when not connected; Slack OAuth state, posting, and dead-webhook cleanup. |
+| Integration (API) | Through supertest: auth errors, profile upsert on first call, field-level validation errors, start-time grace and `START_IN_PAST`, `Idempotency-Key` (sequential and a concurrent double-click), sender selection, cursor pagination with totals, cross-user isolation, cancel, stats and timeline, config and senders without secrets, health, Bull Board basic auth, Slack not configured, callback redirects. |
+| Integration (Elasticsearch) | Domain search through the address analyzer, subject and body search, user scoping, status filter, stale writes ignored through external versioning, `search_after` paging. |
+| End-to-end, manual | Real Ethereal sends, the restart test, the rate limit plus Slack, and disconnect/reconnect, scripted in the README. |
 
 ## 15. Observability
 
