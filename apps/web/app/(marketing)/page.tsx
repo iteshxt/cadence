@@ -139,7 +139,7 @@ export default function LandingPage() {
 
       <main>
         {/* Hero: fills the first screen; the guarantees band anchors its bottom edge. */}
-        <section className="flex min-h-svh flex-col bg-canvas pt-20">
+        <section className="flex min-h-svh flex-col overflow-x-clip bg-canvas pt-20">
           <div className="mx-auto grid w-full max-w-[1280px] flex-1 grid-cols-1 content-center items-center gap-16 max-md:gap-12 px-8 py-14 max-md:px-4 max-md:py-10 lg:grid-cols-[minmax(0,6fr)_minmax(0,7fr)]">
             <div className="min-w-0 max-w-[640px]">
               <h1
@@ -163,11 +163,16 @@ export default function LandingPage() {
               </p>
             </div>
 
-            {/* The live queue sits on a teal "stage" so the hero carries the brand color. */}
+            {/* The live queue floats on a teal glow so the hero carries the brand color. */}
             <div style={rise(300)} className="relative min-w-0 motion-safe:animate-rise">
+              {/* A soft teal glow centered behind the queue: no edges, it just fades out. */}
               <div
                 aria-hidden
-                className="absolute -inset-4 rounded-[28px] bg-signal-soft sm:-inset-6 lg:-inset-8 lg:translate-x-5 lg:translate-y-5"
+                className="pointer-events-none absolute -inset-x-[10%] -inset-y-[16%] blur-3xl"
+                style={{
+                  background:
+                    'radial-gradient(closest-side, color-mix(in oklab, var(--signal) 55%, transparent), color-mix(in oklab, var(--signal) 28%, transparent) 60%, transparent)',
+                }}
               />
               <div className="relative">
                 <HeroQueue />
