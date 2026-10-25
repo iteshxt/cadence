@@ -12,3 +12,6 @@ next-env.d.ts
 
 .DS_Store
 *.log
+
+# Editor chat-history exports
+.specstory/
