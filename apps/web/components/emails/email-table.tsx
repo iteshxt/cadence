@@ -203,8 +203,11 @@ export function EmailTable(props: EmailTableProps) {
                 </span>
               )}
             </td>
-            <td className={`w-28 px-4 py-1.5 whitespace-nowrap text-ink-2 ${collapseLg}`}>
-              <span>{e.senderLabel}</span>
+            <td className={`w-48 px-4 py-1.5 whitespace-nowrap text-ink-2 ${collapseLg}`}>
+              {/* Gmail labels default to the address, so long ones are cut short (full on hover). */}
+              <span title={e.senderLabel} className="block max-w-40 truncate">
+                {e.senderLabel}
+              </span>
             </td>
             <td className="w-40 px-4 py-1.5 whitespace-nowrap max-md:w-28 max-md:pl-2">
               {deferNote ? (
@@ -255,7 +258,7 @@ export function EmailTable(props: EmailTableProps) {
               <th scope="col" className={`px-4 font-medium ${collapseMd}`}>
                 <span>Subject</span>
               </th>
-              <th scope="col" className={`w-28 px-4 font-medium ${collapseLg}`}>
+              <th scope="col" className={`w-48 px-4 font-medium ${collapseLg}`}>
                 <span>Sender</span>
               </th>
               <th scope="col" className="w-40 px-4 font-medium max-md:w-28 max-md:pl-2">

@@ -175,7 +175,7 @@ A label over a value, with no box around it. Used in a row under the pace strip 
 
 - **Container:** a 10 px panel with a hairline border. Sticky header row: 36 px, `--sunken`, `label` in `--ink-2`.
 - **Body rows:** 48 px, hairline dividers, `--sunken` on hover.
-- **Columns (Scheduled view):** Time (`time` style, left-aligned, 120 px), Recipient (sans, truncated, full value in a tooltip), Subject (`--ink-2`, truncated), Sender (`--ink-2`, 104 px), Status (status mark, 148 px).
+- **Columns (Scheduled view):** Time (`time` style, left-aligned, 120 px), Recipient (sans, truncated, full value in a tooltip), Subject (`--ink-2`, truncated), Sender (`--ink-2`, 192 px; labels default to the Gmail address, so long ones truncate with the full value in a tooltip), Status (status mark, 148 px).
 - **Columns (Sent view):** Time (finished time), Recipient, Subject, Sender, Status, and a "View in Gmail" link with an external-link icon (opens the message in the sender's Gmail; dry-run sends have none). A failed row shows its reason as a `caption` in `--failed` under the subject.
 - **Hour groups:** rows are grouped by UTC hour window. Each group starts with a 36 px `--sunken` row: on the left, "3 PM to 4 PM" in `label` weight 600; on the right, each sender's usage for that window in `caption` tabular figures ("Sender A 142/200"), shown in `--deferred` when the sender is at its cap. When a page starts mid-group, the group row repeats with "(continued)".
 - **Deferred rows:** time column shows the new time, with "was 3:52 PM" as a caption below it.
