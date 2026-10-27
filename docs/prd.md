@@ -183,7 +183,7 @@ A **campaign** is one compose action. It contains one subject, one body, many re
 | ID | Requirement | Priority |
 |---|---|---|
 | SET-1 | Settings has a **Connect Gmail** button that starts Google OAuth with the `gmail.send` scope (plus `openid email profile` to learn the address). The refresh token is stored encrypted, per user. Connecting the same address again refreshes its access instead of adding a duplicate. | P0 |
-| SET-1a | **Signing in connects Gmail too.** "Continue with Google" also asks for `gmail.send` with offline access, so the Gmail account a user signs in with becomes a sender with no extra step. If they untick the Gmail box, sign-in still succeeds and no sender is added. A sender the user disconnected is never reconnected by a later sign-in; only Connect Gmail brings it back. | P0 |
+| SET-1a | **Signing in connects Gmail too.** "Continue with Google" (run by Cadence itself, so Google's screens name Cadence rather than the Supabase project) also asks for `gmail.send` with offline access, so the Gmail account a user signs in with becomes a sender with no extra step. If they untick the Gmail box, sign-in still succeeds and no sender is added. A sender the user disconnected is never reconnected by a later sign-in; only Connect Gmail brings it back. | P0 |
 | SET-2 | If the user unticks the Gmail permission on Google's consent screen, nothing is saved and Settings explains that Cadence needs it to send. | P0 |
 | SET-3 | Each sender shows its address, a **label** and a **display name** (the name recipients see), its **hourly limit**, and this hour's usage. All three are editable. | P0 |
 | SET-4 | **Disconnect** revokes the token at Google and deactivates the sender. Past emails keep their history. | P0 |
@@ -206,7 +206,7 @@ Full details are in tech-spec §6 and design.md §8.
 |---|---|---|
 | `/` | Landing page: hero, how it works, features, sign-in call to action | Public |
 | `/login` | Sign in with Google | Public |
-| `/auth/callback` | Supabase OAuth code exchange | Public |
+| `/auth/google`, `/auth/google/callback` | Cadence's own Google sign-in and Connect Gmail flow | Public |
 | `/dashboard` | Redirects to `/dashboard/scheduled` | Private |
 | `/dashboard/scheduled` | Pace strip, readouts, and the scheduled emails table grouped by hour | Private |
 | `/dashboard/sent` | Sent emails table | Private |

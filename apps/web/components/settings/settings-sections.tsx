@@ -195,12 +195,16 @@ const GMAIL_RESULT: Record<string, { kind: 'success' | 'error' | 'info'; text: s
   error: { kind: 'error', text: 'Couldn’t connect Gmail. Try again.' },
 };
 
+/** Connect Gmail and Reconnect run the web app's Google flow in connect mode (tech-spec §6.1). */
 function useConnectGmail() {
-  return useMutation({
-    mutationFn: () => api<{ url: string }>('/api/integrations/gmail/authorize', { method: 'POST' }),
-    onSuccess: ({ url }) => window.location.assign(url),
-    onError: (err: Error) => toast.error(err.message),
-  });
+  const [isPending, setPending] = useState(false);
+  return {
+    isPending,
+    mutate: () => {
+      setPending(true);
+      window.location.assign('/auth/google?mode=connect');
+    },
+  };
 }
 
 /** One sender: label, address, limit and usage; Edit expands the row in place (design.md §8.4). */

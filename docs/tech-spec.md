@@ -76,7 +76,7 @@ cadence/
 │  │  ├─ app/
 │  │  │  ├─ (marketing)/page.tsx           # /
 │  │  │  ├─ login/{page,login-panel}.tsx   # /login
-│  │  │  ├─ auth/callback/route.ts         # OAuth code exchange
+│  │  │  ├─ auth/google/{route,callback/route}.ts  # Google sign-in and Connect Gmail (§6.1)
 │  │  │  ├─ dashboard/
 │  │  │  │  ├─ layout.tsx                  # header, compose panel, auth check
 │  │  │  │  ├─ page.tsx                    # redirect → scheduled
@@ -266,9 +266,7 @@ The base URL is `/api`. Every route except health, the Slack and Gmail callbacks
 | GET | `/api/senders` | The user's active senders (no secrets): `{ id, label, fromEmail, displayName, cap, status: 'connected' \| 'reconnect', usedThisHour, resetsAt }` |
 | PATCH | `/api/senders/:id` | `{ label?, displayName?, hourlyLimit? }`; `hourlyLimit` is 1 to the server maximum |
 | DELETE | `/api/senders/:id` | Disconnect: revokes the token at Google, clears it, and deactivates the sender |
-| POST | `/api/integrations/gmail/authorize` | Returns `{ url }`: Google's consent screen with a signed state (§7.3) |
-| POST | `/api/integrations/gmail/sign-in` | `{ refreshToken }` from the sign-in callback (§6.1). Returns `{ result: 'connected' \| 'scope' \| 'disconnected' }` |
-| GET | `/api/integrations/gmail/callback` | Google's redirect target (public). Stores the sender, then redirects to `/dashboard/settings?gmail=connected\|cancelled\|scope\|error` |
+| POST | `/api/integrations/gmail/connect` | `{ refreshToken, reconnect? }` from the web app's Google callback (§6.1). Returns `{ result: 'connected' \| 'scope' \| 'disconnected' }` |
 | GET | `/api/settings` | `{ defaultDelaySeconds, defaultHourlyLimit }` (product defaults when unset) |
 | PUT | `/api/settings` | Saves both defaults (same bounds as the campaign fields) |
 | POST | `/api/campaigns` | Create a campaign and schedule its emails |
@@ -356,8 +354,10 @@ Feeds the dashboard pace strip (design.md §7.1). The range is capped at 24 hour
 
 ### 6.1 Auth flow
 
-1. On `/login`, the "Continue with Google" button calls `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: <origin>/auth/callback?next=/dashboard, scopes: 'https://www.googleapis.com/auth/gmail.send', queryParams: { access_type: 'offline', prompt: 'consent' } }})`. Supabase adds `openid email profile`; the extra scope and offline access make Google return a refresh token for sending (PRD SET-1a).
-2. Google sends the user to Supabase, which sends them to `/auth/callback`. That route calls `exchangeCodeForSession`. The returned session carries `provider_refresh_token` **only in this response** (Supabase doesn't store it), so when it is present the route posts it, server to server with the new access token, to `POST /api/integrations/gmail/sign-in` (§7.3). That call is best effort with a 5 s timeout: if the API is down or the user unticked Gmail, sign-in still completes and they can use Connect Gmail later. Then it redirects to `next`.
+1. **Cadence runs the Google sign-in itself**, so Google's screens name Cadence's own domain (and, once the brand is verified, "Cadence Mail") instead of the Supabase project URL. "Continue with Google" opens `/auth/google?next=…`. That route handler creates a random `state` and a random `nonce`, keeps both (plus `next` and the mode) in a 10-minute httpOnly, `SameSite=Lax` cookie scoped to `/auth/google`, and redirects to Google's consent screen: `scope=openid email profile https://www.googleapis.com/auth/gmail.send`, `access_type=offline`, `include_granted_scopes=true`, `prompt=select_account`, `nonce=sha256(nonce)`, `redirect_uri=<origin>/auth/google/callback`.
+2. `/auth/google/callback` checks `state` against the cookie, exchanges the code at Google's token endpoint with `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (server-only variables of the web app), and signs in with `supabase.auth.signInWithIdToken({ provider: 'google', token: id_token, nonce })`. Supabase checks the token's audience against its Google provider's client ID (the same client) and the nonce, then sets the session cookies. The same Google account maps to the same Supabase user as before.
+3. If Google returned a refresh token (on a user's first consent), the callback posts it with the new access token to `POST /api/integrations/gmail/connect` (§7.3), best effort with a 5 s timeout: sign-in never fails because of it. Later sign-ins don't get a new refresh token and don't need one; the sender already exists.
+4. **Connect Gmail** (and Reconnect) in Settings use the same routes with `mode=connect`: `prompt=consent select_account` so Google always returns a refresh token for the chosen account, no `signInWithIdToken` (adding a second Gmail must not switch the signed-in user), the connect call with `reconnect: true`, and a redirect to `/dashboard/settings?gmail=connected|cancelled|scope|error`.
 3. `proxy.ts` (Next.js 16's name for `middleware.ts`) refreshes the session cookie on every request. Visiting `/dashboard/*` without a session redirects to `/login?next=…`. Visiting `/login` with a session redirects to `/dashboard`.
 4. `lib/api.ts` reads the access token from the Supabase client and sends it as a Bearer token to the Express API.
 5. The header reads `user.user_metadata.full_name`, `avatar_url`, and `email`.
@@ -369,7 +369,7 @@ Feeds the dashboard pace strip (design.md §7.1). The range is capped at 24 hour
 |---|---|---|
 | `/` | Static (RSC) plus one client island | Layout and copy per design.md §8.1: left-aligned hero with the scripted pace strip demo (client island, no API calls), "How a campaign runs" in 3 steps, "What happens when…" list, footer with the tech line. |
 | `/login` | Client | A centered panel: mark, "Sign in to Cadence", Google button, small legal text. Shows an error banner if the OAuth error parameter is present. |
-| `/auth/callback` | Route handler | Code exchange and redirect. |
+| `/auth/google`, `/auth/google/callback` | Route handlers | Start Google's flow; exchange the code, sign in with the ID token or connect Gmail, and redirect (§6.1). |
 | `/dashboard` | Server | Redirects to `/dashboard/scheduled`. |
 | `/dashboard/scheduled` | Client islands | Page title with strip range control, `PaceStrip` (`/api/timeline`), `Readouts` (`/api/stats`), `EmailTable view="scheduled"` grouped by hour. Polls every 5 seconds. |
 | `/dashboard/sent` | Client islands | Same shell, strip showing the last 3 hours. `EmailTable view="sent"` with the "View" link (opens the message in Gmail) and failure reasons inline. |
@@ -483,19 +483,12 @@ Processor steps for `{ emailId }`:
 
 ### 7.3 Gmail (`gmail.service.ts`)
 
-**Connecting (OAuth 2.0 authorization code flow, run by the API):**
+**Connecting** (`connectWithRefreshToken`, PRD SET-1, SET-1a). The web app runs the OAuth flow (§6.1) with the same OAuth client the API holds, so the refresh token it forwards works with the API's `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
 
-1. `POST /api/integrations/gmail/authorize` returns Google's consent URL with `scope=openid email profile https://www.googleapis.com/auth/gmail.send`, `access_type=offline`, `prompt=consent` (so Google always returns a refresh token), `include_granted_scopes=true`, and a `state` that is an HS256 JWT signed with `STATE_SECRET` (subject = user ID, audience `gmail-oauth`, 10-minute expiry), the same pattern as Slack.
-2. Google redirects to `GMAIL_REDIRECT_URI` (`/api/integrations/gmail/callback`). The API verifies the state, exchanges the code at `https://oauth2.googleapis.com/token`, and checks that the granted `scope` includes `gmail.send`; Google's consent screen lets users untick it, in which case nothing is stored and Settings shows `?gmail=scope`.
-3. The address and name come from the `id_token` in the token response. It arrives directly from Google over TLS, so its payload is read without a signature check (Google's documented exception). An address that isn't `email_verified` is refused.
-4. The sender is upserted on `(user_id, from_email)`: a reconnect replaces the refresh token and clears `needs_reconnect` and `is_active=false`, keeping the label, display name, and limit. A new sender gets label = address, display name = the Google name, and `hourly_limit = min(20, MAX_EMAILS_PER_HOUR_PER_SENDER)`.
-
-**Connecting at sign-in** (`connectFromSignIn`, PRD SET-1a): Supabase's Google provider uses the same OAuth client, so the refresh token from sign-in works with `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
-
-1. Refresh it once at the token endpoint. A failure means it isn't ours or isn't valid: nothing is stored.
-2. If the granted `scope` lacks `gmail.send` (the user unticked it), return `scope` and store nothing.
+1. Refresh it once at `https://oauth2.googleapis.com/token`. A failure means it isn't ours or isn't valid: nothing is stored.
+2. If the granted `scope` lacks `gmail.send` (Google's consent screen lets people untick it), return `scope` and store nothing.
 3. Read the address and name from `https://openidconnect.googleapis.com/v1/userinfo` with the new access token, and refuse an unverified address.
-4. Upsert the sender like the callback does, except that a conflicting row the user **disconnected** (`is_active = false`) is left alone (`ON CONFLICT … DO UPDATE … WHERE is_active`), and the result is `disconnected`.
+4. Upsert the sender on `(user_id, from_email)`. A new sender gets label = address, display name = the Google name, and `hourly_limit = min(20, MAX_EMAILS_PER_HOUR_PER_SENDER)`. An existing one gets the new refresh token and loses `needs_reconnect`, keeping its label, display name, and limit. A row the user **disconnected** (`is_active = false`) is reactivated only when `reconnect` is set (Connect Gmail); from sign-in it is left alone (`ON CONFLICT … DO UPDATE … WHERE is_active`) and the result is `disconnected`.
 
 **Sending:**
 
@@ -677,7 +670,8 @@ The script `pnpm load-test --count 1000 --start now` makes this reproducible. It
 - **Google user data:** only the address, name, and the `gmail.send` permission are requested, used solely to send the user's own campaigns, never shared or used for anything else (Google API Services User Data Policy, Limited Use). Disconnecting revokes access.
 - **HTTP:** `helmet`, CORS restricted to `WEB_URL`, a 1 MB JSON limit, and `express-rate-limit` on `POST /api/campaigns` (10 requests per minute per user).
 - **Bull Board:** basic auth using `BULL_BOARD_USER` and `BULL_BOARD_PASS`.
-- **Slack and Gmail OAuth:** the signed, expiring `state` (separate audiences) protects against CSRF and ties the callback to the user.
+- **Slack OAuth:** the signed, expiring `state` protects against CSRF and ties the callback to the user.
+- **Google sign-in and Connect Gmail:** a random `state` and `nonce` in a short-lived httpOnly cookie protect against CSRF and token replay; Supabase verifies the ID token's audience and nonce. The connect call is authenticated with the user's session, so a sender always belongs to the signed-in user.
 - **Senders:** every sender query is scoped by `user_id`; a campaign may only use the requesting user's active senders.
 
 ## 13. Environments and deployment
@@ -709,7 +703,7 @@ This is a product demo, so the hosting goal is **$0 per month**. The worker send
 | HTTPS for the API | **Caddy** + a free **DuckDNS** subdomain (e.g. `cadence-api.duckdns.org`) | Automatic Let's Encrypt certificates. HTTPS is required: the Vercel site can't call a plain-HTTP API (mixed content), and Slack requires an HTTPS redirect URL. |
 | Postgres and Auth | **Supabase Free** | Use the **session pooler** connection string (IPv4, port 5432). The direct connection is IPv6-only. Free projects pause after 7 days without activity, so open the app before a demo. |
 | Email | **Gmail API** | Free, within each Gmail account's sending limits. |
-| OAuth | Google Cloud (free), Slack app (free) | The Google OAuth client allows two redirect URIs: the Supabase callback (sign-in) and `https://<duckdns>/api/integrations/gmail/callback` (Connect Gmail). The Gmail API is enabled and `gmail.send` is on the consent screen. Supabase allows the Vercel URL. The Slack redirect points to `https://<duckdns>/api/integrations/slack/callback`. |
+| OAuth | Google Cloud (free), Slack app (free) | The Google OAuth client's redirect URIs are the web app's `/auth/google/callback` (`http://localhost:3000/...` and `https://<project>.vercel.app/...`). The web app on Vercel also needs `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. The Gmail API is enabled and `gmail.send` is on the consent screen. Supabase allows the Vercel URL. The Slack redirect points to `https://<duckdns>/api/integrations/slack/callback`. |
 
 **Day-one checks (M0), before writing app code:**
 
@@ -743,7 +737,6 @@ SLACK_CLIENT_SECRET=
 SLACK_REDIRECT_URI=http://localhost:4000/api/integrations/slack/callback  # prod: https://<duckdns>/api/...
 GOOGLE_CLIENT_ID=                               # the same OAuth client as Supabase sign-in
 GOOGLE_CLIENT_SECRET=
-GMAIL_REDIRECT_URI=http://localhost:4000/api/integrations/gmail/callback  # prod: https://<duckdns>/api/...
 BULL_BOARD_USER=admin
 BULL_BOARD_PASS=change-me
 # deploy (VM only)
@@ -753,6 +746,8 @@ ACME_EMAIL=you@example.com            # Let's Encrypt contact for Caddy
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=           # or the legacy anon key
 NEXT_PUBLIC_API_URL=http://localhost:4000       # prod: https://cadence-api.duckdns.org
+GOOGLE_CLIENT_ID=                               # server-only: the web app runs the Google sign-in (§6.1)
+GOOGLE_CLIENT_SECRET=
 ```
 
 ## 14. Testing strategy

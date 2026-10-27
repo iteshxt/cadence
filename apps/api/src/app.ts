@@ -12,7 +12,7 @@ import { basicAuth } from './middleware/basicAuth.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 import { campaignsRouter } from './routes/campaigns.js';
 import { emailsRouter } from './routes/emails.js';
-import { gmailCallbackRouter, gmailRouter } from './routes/gmail.js';
+import { gmailRouter } from './routes/gmail.js';
 import { miscRouter } from './routes/misc.js';
 import { searchRouter } from './routes/search.js';
 import { sendersRouter } from './routes/senders.js';
@@ -94,9 +94,8 @@ export function createApp(ctx: Context, opts: AppOptions = {}): Express {
   );
   app.use(express.json({ limit: '1mb' }));
 
-  // Public: Slack and Google redirect here without a session; the signed state identifies the user.
+  // Public: Slack redirects here without a session; the signed state identifies the user.
   app.use('/api/integrations/slack', slackCallbackRouter(ctx));
-  app.use('/api/integrations/gmail', gmailCallbackRouter(ctx));
 
   const auth = createAuthMiddleware({
     verify: opts.verify ?? supabaseVerifier(ctx.env.SUPABASE_URL),

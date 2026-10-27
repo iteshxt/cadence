@@ -1,5 +1,4 @@
 import { eq } from 'drizzle-orm';
-import { SignJWT } from 'jose';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { senders, type SenderRow } from '../src/db/schema.js';
 import type { GmailConnectError } from '../src/services/gmail.service.js';
@@ -9,7 +8,6 @@ import { resetState, seedSenders, seedUser, testContext } from './helpers.js';
 const ctx = testContext({
   GOOGLE_CLIENT_ID: 'client-id',
   GOOGLE_CLIENT_SECRET: 'client-secret',
-  GMAIL_REDIRECT_URI: 'http://localhost:4000/api/integrations/gmail/callback',
 });
 
 const SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
@@ -48,13 +46,6 @@ const TOKEN = 'https://oauth2.googleapis.com/token';
 const SEND = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
 const tokenOk = () => json(200, { access_token: 'access-1', expires_in: 3600 });
 const email = { emailId: 'e-1', to: 'lead@example.com', subject: 'Hello', text: 'Hi there' };
-
-/** An unsigned ID token: the service reads its claims without verifying (tech-spec §7.3). */
-async function idToken(claims: Record<string, unknown>) {
-  return new SignJWT(claims)
-    .setProtectedHeader({ alg: 'HS256' })
-    .sign(new TextEncoder().encode('not-google'));
-}
 
 function service(google: ReturnType<typeof fakeGoogle>, dryRun = false) {
   return createGmail({
@@ -160,108 +151,7 @@ describe('sending', () => {
   });
 });
 
-describe('connecting', () => {
-  async function stateFor(gmail: ReturnType<typeof service>, uid: string) {
-    return new URL(await gmail.authorizeUrl(uid)).searchParams.get('state')!;
-  }
-
-  it('asks for offline gmail.send access with a signed state', async () => {
-    const url = new URL(await service(fakeGoogle()).authorizeUrl(userId));
-    expect(url.searchParams.get('scope')).toContain(SEND_SCOPE);
-    expect(url.searchParams.get('access_type')).toBe('offline');
-    expect(url.searchParams.get('prompt')).toBe('consent');
-    expect(url.searchParams.get('state')).toBeTruthy();
-  });
-
-  it('stores a new sender with the default limit, and a reconnect keeps its settings', async () => {
-    const google = fakeGoogle();
-    const gmail = service(google);
-    const token = await idToken({
-      email: 'new@gmail.com',
-      email_verified: true,
-      name: 'New Person',
-    });
-    const exchange = () =>
-      json(200, {
-        access_token: 'a',
-        expires_in: 3600,
-        refresh_token: 'r-1',
-        scope: `openid email ${SEND_SCOPE}`,
-        id_token: token,
-      });
-    google.on(TOKEN, exchange(), exchange());
-
-    await gmail.completeOAuth('code', await stateFor(gmail, userId));
-    const [created] = await ctx.db
-      .select()
-      .from(senders)
-      .where(eq(senders.fromEmail, 'new@gmail.com'));
-    expect(created).toMatchObject({
-      userId,
-      label: 'new@gmail.com',
-      displayName: 'New Person',
-      hourlyLimit: 20,
-      isActive: true,
-    });
-    expect(ctx.crypto.decrypt(created!.refreshTokenEnc!)).toBe('r-1');
-
-    await ctx.db
-      .update(senders)
-      .set({ label: 'Sales', hourlyLimit: 7, isActive: false, needsReconnect: true })
-      .where(eq(senders.id, created!.id));
-    await gmail.completeOAuth('code', await stateFor(gmail, userId));
-    const rows = await ctx.db.select().from(senders).where(eq(senders.fromEmail, 'new@gmail.com'));
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      label: 'Sales',
-      hourlyLimit: 7,
-      isActive: true,
-      needsReconnect: false,
-    });
-  });
-
-  it('refuses when the user unticked the Gmail permission', async () => {
-    const google = fakeGoogle();
-    const gmail = service(google);
-    google.on(
-      TOKEN,
-      json(200, {
-        refresh_token: 'r',
-        scope: 'openid email',
-        id_token: await idToken({ email: 'x@gmail.com', email_verified: true }),
-      }),
-    );
-    const err = await gmail
-      .completeOAuth('code', await stateFor(gmail, userId))
-      .catch((e: unknown) => e);
-    expect((err as GmailConnectError).reason).toBe('scope');
-    expect(await ctx.db.select().from(senders).where(eq(senders.fromEmail, 'x@gmail.com'))).toEqual(
-      [],
-    );
-  });
-
-  it('refuses an unverified address and a forged state', async () => {
-    const google = fakeGoogle();
-    const gmail = service(google);
-    google.on(
-      TOKEN,
-      json(200, {
-        refresh_token: 'r',
-        scope: SEND_SCOPE,
-        id_token: await idToken({ email: 'y@gmail.com', email_verified: false }),
-      }),
-    );
-    const unverified = await gmail
-      .completeOAuth('code', await stateFor(gmail, userId))
-      .catch((e: unknown) => e);
-    expect((unverified as GmailConnectError).reason).toBe('unverified');
-
-    const forged = await gmail.completeOAuth('code', 'not-a-state').catch((e: unknown) => e);
-    expect((forged as GmailConnectError).reason).toBe('state');
-  });
-});
-
-describe('connecting at sign-in', () => {
+describe('connecting with a refresh token', () => {
   const USERINFO = 'https://openidconnect.googleapis.com/v1/userinfo';
   const refreshed = (scope: string) =>
     json(200, { access_token: 'a', expires_in: 3600, scope: `openid email ${scope}` });
@@ -272,7 +162,7 @@ describe('connecting at sign-in', () => {
     const google = fakeGoogle();
     google.on(TOKEN, refreshed(SEND_SCOPE));
     google.on(USERINFO, me());
-    expect(await service(google).connectFromSignIn(userId, 'r-sign-in')).toBe('connected');
+    expect(await service(google).connectWithRefreshToken(userId, 'r-sign-in')).toBe('connected');
     const [row] = await rowsFor();
     expect(row).toMatchObject({ userId, displayName: 'Me', hourlyLimit: 20, isActive: true });
     expect(ctx.crypto.decrypt(row!.refreshTokenEnc!)).toBe('r-sign-in');
@@ -281,8 +171,29 @@ describe('connecting at sign-in', () => {
   it('stores nothing when the user unticked the Gmail permission', async () => {
     const google = fakeGoogle();
     google.on(TOKEN, refreshed('profile'));
-    expect(await service(google).connectFromSignIn(userId, 'r')).toBe('scope');
+    expect(await service(google).connectWithRefreshToken(userId, 'r')).toBe('scope');
     expect(await rowsFor()).toEqual([]);
+  });
+
+  it('reactivates a disconnected sender only through Connect Gmail', async () => {
+    const google = fakeGoogle();
+    google.on(TOKEN, refreshed(SEND_SCOPE), refreshed(SEND_SCOPE));
+    google.on(USERINFO, me(), me());
+    await seedSenders(ctx, userId, 1, {
+      fromEmail: 'me@gmail.com',
+      label: 'Sales',
+      hourlyLimit: 7,
+      isActive: false,
+      refreshTokenEnc: null,
+    });
+    const gmail = service(google);
+    expect(await gmail.connectWithRefreshToken(userId, 'r-1')).toBe('disconnected');
+    expect(await gmail.connectWithRefreshToken(userId, 'r-2', { reconnect: true })).toBe(
+      'connected',
+    );
+    const [row] = await rowsFor();
+    expect(row).toMatchObject({ isActive: true, label: 'Sales', hourlyLimit: 7 });
+    expect(ctx.crypto.decrypt(row!.refreshTokenEnc!)).toBe('r-2');
   });
 
   it('never reconnects a sender the user disconnected', async () => {
@@ -294,7 +205,7 @@ describe('connecting at sign-in', () => {
       isActive: false,
       refreshTokenEnc: null,
     });
-    expect(await service(google).connectFromSignIn(userId, 'r-new')).toBe('disconnected');
+    expect(await service(google).connectWithRefreshToken(userId, 'r-new')).toBe('disconnected');
     const [row] = await rowsFor();
     expect(row).toMatchObject({ isActive: false, refreshTokenEnc: null });
   });
@@ -303,7 +214,7 @@ describe('connecting at sign-in', () => {
     const google = fakeGoogle();
     google.on(TOKEN, json(400, { error: 'invalid_grant' }));
     const err = await service(google)
-      .connectFromSignIn(userId, 'stolen')
+      .connectWithRefreshToken(userId, 'stolen')
       .catch((e: unknown) => e);
     expect((err as GmailConnectError).reason).toBe('exchange');
   });

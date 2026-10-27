@@ -323,13 +323,19 @@ describe('senders and settings', () => {
     expect(bad.status).toBe(400);
   });
 
-  it('refuses to connect Gmail when it is not configured, and sends callback errors to Settings', async () => {
-    const res = await request(app).post('/api/integrations/gmail/authorize').set(auth(alice));
+  it('validates the Gmail connect call and refuses it when Gmail is not configured', async () => {
+    const bad = await request(app)
+      .post('/api/integrations/gmail/connect')
+      .set(auth(alice))
+      .send({});
+    expect(bad.status).toBe(400);
+    const res = await request(app)
+      .post('/api/integrations/gmail/connect')
+      .set(auth(alice))
+      .send({ refreshToken: 'r' });
     expect(res.status).toBe(503);
     expect(res.body.error.code).toBe('GMAIL_ERROR');
-    const cb = await request(app).get('/api/integrations/gmail/callback?error=access_denied');
-    expect(cb.status).toBe(303);
-    expect(cb.headers.location).toBe('http://localhost:3000/dashboard/settings?gmail=cancelled');
+    expect((await request(app).post('/api/integrations/gmail/connect').send({})).status).toBe(401);
   });
 });
 

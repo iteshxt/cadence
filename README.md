@@ -47,20 +47,20 @@ Without `--profile localdb`, point `DATABASE_URL` at Supabase's **session pooler
 
 ### Supabase setup
 
-1. Create a project. Under **Authentication → Providers**, enable **Google** with a Google Cloud OAuth client. Its authorized redirect URI is `https://<ref>.supabase.co/auth/v1/callback`.
-2. Under **Authentication → URL configuration**, add `http://localhost:3000/auth/callback` and your Vercel URL's `/auth/callback` as redirect URLs.
-3. Confirm `https://<ref>.supabase.co/auth/v1/.well-known/jwks.json` returns at least one key. If it is empty, the project still uses the legacy JWT secret; migrate it under **Project Settings → JWT Keys** (tech-spec §12).
+1. Create a project. Under **Authentication → Providers**, enable **Google** with the same Google Cloud OAuth client Cadence uses. Cadence signs in with Google's ID token (`signInWithIdToken`), so Supabase's own callback URL isn't used.
+2. Confirm `https://<ref>.supabase.co/auth/v1/.well-known/jwks.json` returns at least one key. If it is empty, the project still uses the legacy JWT secret; migrate it under **Project Settings → JWT Keys** (tech-spec §12).
 
-### Gmail setup
+### Google sign-in and Gmail setup
 
-Senders are the Gmail accounts users connect in **Settings → Connect Gmail**. In the Google Cloud project that holds the sign-in OAuth client:
+Cadence runs the Google flow itself (tech-spec §6.1), so Google's screens show Cadence's domain, and once Google verifies the brand, its name. Signing in also connects that Gmail account as a sender; **Connect Gmail** in Settings adds more. In the Google Cloud project that holds the OAuth client:
 
 1. **APIs & Services → Library:** enable the **Gmail API**.
 2. **Google Auth Platform → Data Access:** add the scope `https://www.googleapis.com/auth/gmail.send`.
-3. **Clients → your Web client → Authorized redirect URIs:** add `http://localhost:4000/api/integrations/gmail/callback` and `https://<API URL>/api/integrations/gmail/callback`.
-4. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GMAIL_REDIRECT_URI` in `apps/api/.env`.
+3. **Clients → your Web client → Authorized redirect URIs:** add `http://localhost:3000/auth/google/callback` and `https://<your Vercel domain>/auth/google/callback`.
+4. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in both `apps/web/.env.local` and `apps/api/.env` (the web app signs in with them, the API refreshes tokens to send).
+5. In Supabase, the Google provider must have the same client ID (it checks the ID token's audience), with **Skip nonce checks** off.
 
-`gmail.send` is a sensitive scope. Until Google verifies the app, people see an "unverified app" screen when connecting (choose **Advanced → Go to Cadence**), and up to 100 users can connect. Verification needs the privacy policy at `/privacy` and a short demo video.
+`gmail.send` is a sensitive scope. Until Google verifies the app, people see an "unverified app" screen (choose **Advanced → Go to Cadence**), and up to 100 users can sign in. Verification needs the privacy policy at `/privacy` and a short demo video.
 
 To try the pipeline without sending anything, start the worker with `SEND_DRY_RUN=true`: every step runs, but sends are recorded instead of reaching Gmail.
 
@@ -119,7 +119,7 @@ See tech-spec §13.2 for why the setup looks like this. In short, the worker is 
 **Web on Vercel:**
 
 1. Import the repo and set **Root Directory** to `apps/web`.
-2. Add the `NEXT_PUBLIC_*` variables. `NEXT_PUBLIC_API_URL` is `https://<your DuckDNS name>`.
+2. Add the `NEXT_PUBLIC_*` variables, plus `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (not public). `NEXT_PUBLIC_API_URL` is `https://<your DuckDNS name>`.
 
 **API, worker, Redis and Elasticsearch on an Oracle Cloud Always Free VM:**
 

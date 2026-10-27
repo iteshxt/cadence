@@ -48,7 +48,6 @@ const EnvSchema = z.object({
   SLACK_REDIRECT_URI: optionalString,
   GOOGLE_CLIENT_ID: optionalString,
   GOOGLE_CLIENT_SECRET: optionalString,
-  GMAIL_REDIRECT_URI: optionalString,
   /** Record sends without calling Gmail (load test, local runs without Google). Never in production. */
   SEND_DRY_RUN: z
     .enum(['true', 'false', '1', '0', ''])
@@ -67,10 +66,6 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new Error(`Invalid environment configuration:\n${lines.join('\n')}`);
   }
   return result.data;
-}
-
-export function gmailConfigured(env: Env): boolean {
-  return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GMAIL_REDIRECT_URI);
 }
 
 export function slackConfigured(env: Env): boolean {

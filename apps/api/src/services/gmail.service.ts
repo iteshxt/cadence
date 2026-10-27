@@ -1,7 +1,5 @@
-import { randomBytes } from 'node:crypto';
 import { LIMITS } from '@cadence/shared';
 import { eq } from 'drizzle-orm';
-import { decodeJwt, jwtVerify, SignJWT } from 'jose';
 import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import type { Env } from '../config/env.js';
 import type { Db } from '../db/client.js';
@@ -10,14 +8,11 @@ import type { Crypto } from '../lib/crypto.js';
 import { AppError } from '../lib/errors.js';
 import type { Logger } from '../lib/logger.js';
 
-const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 const USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 const SEND_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
 const SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
-const SCOPES = `openid email profile ${SEND_SCOPE}`;
-const STATE_AUDIENCE = 'gmail-oauth';
 
 /** Refresh a cached access token this long before Google says it expires. */
 const TOKEN_MARGIN_MS = 60_000;
@@ -56,10 +51,10 @@ export function classifySendError(err: unknown): SendErrorKind {
   return err instanceof GmailError ? err.kind : 'ambiguous';
 }
 
-/** Why connecting Gmail failed, mapped to the Settings redirect (`?gmail=`). */
+/** Why a Gmail account couldn't be connected. */
 export class GmailConnectError extends Error {
   constructor(
-    readonly reason: 'state' | 'scope' | 'unverified' | 'exchange',
+    readonly reason: 'unverified' | 'exchange',
     message: string,
   ) {
     super(message);
@@ -88,12 +83,7 @@ export interface GmailDeps {
   crypto: Crypto;
   env: Pick<
     Env,
-    | 'GOOGLE_CLIENT_ID'
-    | 'GOOGLE_CLIENT_SECRET'
-    | 'GMAIL_REDIRECT_URI'
-    | 'STATE_SECRET'
-    | 'MAX_EMAILS_PER_HOUR_PER_SENDER'
-    | 'SEND_DRY_RUN'
+    'GOOGLE_CLIENT_ID' | 'GOOGLE_CLIENT_SECRET' | 'MAX_EMAILS_PER_HOUR_PER_SENDER' | 'SEND_DRY_RUN'
   >;
   log: Logger;
   fetch?: FetchFn;
@@ -123,19 +113,17 @@ export function gmailLink(fromEmail: string, messageId: string): string {
 export function createGmail(deps: GmailDeps) {
   const http = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
-  const stateKey = new TextEncoder().encode(deps.env.STATE_SECRET);
   /** Access tokens by sender ID. They live only in this process's memory. */
   const tokens = new Map<string, { token: string; expiresAt: number }>();
 
   function requireConfigured() {
-    const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GMAIL_REDIRECT_URI } = deps.env;
-    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GMAIL_REDIRECT_URI) {
+    const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } = deps.env;
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
       throw new AppError(503, 'GMAIL_ERROR', 'Gmail isn’t configured on this server.');
     }
     return {
       clientId: GOOGLE_CLIENT_ID,
       clientSecret: GOOGLE_CLIENT_SECRET,
-      redirectUri: GMAIL_REDIRECT_URI,
     };
   }
 
@@ -326,104 +314,16 @@ export function createGmail(deps: GmailDeps) {
   return {
     send,
 
-    /** Google's consent URL with a signed, 10-minute `state` that carries the user ID. */
-    async authorizeUrl(userId: string): Promise<string> {
-      const { clientId, redirectUri } = requireConfigured();
-      const state = await new SignJWT({ nonce: randomBytes(12).toString('base64url') })
-        .setProtectedHeader({ alg: 'HS256' })
-        .setSubject(userId)
-        .setIssuedAt()
-        .setExpirationTime('10m')
-        .setAudience(STATE_AUDIENCE)
-        .sign(stateKey);
-      const url = new URL(AUTH_URL);
-      url.searchParams.set('client_id', clientId);
-      url.searchParams.set('redirect_uri', redirectUri);
-      url.searchParams.set('response_type', 'code');
-      url.searchParams.set('scope', SCOPES);
-      url.searchParams.set('access_type', 'offline');
-      url.searchParams.set('prompt', 'consent');
-      url.searchParams.set('include_granted_scopes', 'true');
-      url.searchParams.set('state', state);
-      return url.toString();
-    },
-
     /**
-     * Exchanges the code and stores the sender (tech-spec §7.3). Reconnecting an address the user
-     * already has refreshes its access and keeps its label, display name, and limit.
+     * Turns a refresh token from the web app's Google flow into a sender (PRD SET-1, SET-1a,
+     * tech-spec §7.3). The web app uses the same OAuth client, so it refreshes with our
+     * credentials. `reconnect` (Connect Gmail) may bring back a sender the user disconnected;
+     * sign-in never does.
      */
-    async completeOAuth(
-      code: string,
-      state: string,
-    ): Promise<{ userId: string; fromEmail: string }> {
-      const { clientId, clientSecret, redirectUri } = requireConfigured();
-      let userId: string;
-      try {
-        const { payload } = await jwtVerify(state, stateKey, { audience: STATE_AUDIENCE });
-        if (!payload.sub) throw new Error('missing subject');
-        userId = payload.sub;
-      } catch {
-        throw new GmailConnectError('state', 'The Google sign-in link expired.');
-      }
-
-      const res = await postForm(
-        TOKEN_URL,
-        {
-          code,
-          client_id: clientId,
-          client_secret: clientSecret,
-          redirect_uri: redirectUri,
-          grant_type: 'authorization_code',
-        },
-        TOKEN_TIMEOUT_MS,
-      );
-      const body = (await res.json().catch(() => ({}))) as {
-        access_token?: string;
-        expires_in?: number;
-        refresh_token?: string;
-        scope?: string;
-        id_token?: string;
-        error?: string;
-      };
-      if (!res.ok || !body.refresh_token || !body.id_token) {
-        deps.log.warn({ status: res.status, error: body.error }, 'google token exchange failed');
-        throw new GmailConnectError('exchange', 'Google didn’t complete the connection.');
-      }
-      if (!body.scope?.split(' ').includes(SEND_SCOPE)) {
-        // The consent screen lets people untick the Gmail box. Without it we can't send.
-        throw new GmailConnectError('scope', 'Cadence needs permission to send email.');
-      }
-
-      // The ID token came straight from Google's token endpoint over TLS, so its claims can be
-      // read without verifying the signature (Google's documented exception).
-      const claims = decodeJwt(body.id_token) as {
-        email?: string;
-        email_verified?: boolean;
-        name?: string;
-      };
-      if (!claims.email || claims.email_verified !== true) {
-        throw new GmailConnectError('unverified', 'This Google account’s address isn’t verified.');
-      }
-
-      await saveSender({
-        userId,
-        email: claims.email,
-        name: claims.name,
-        refreshToken: body.refresh_token,
-        accessToken: body.access_token,
-        expiresIn: body.expires_in,
-        reactivate: true,
-      });
-      return { userId, fromEmail: claims.email };
-    },
-
-    /**
-     * Turns the refresh token from Google sign-in into a sender (PRD SET-1a, tech-spec §7.3).
-     * Supabase uses the same OAuth client, so the token refreshes with our credentials.
-     */
-    async connectFromSignIn(
+    async connectWithRefreshToken(
       userId: string,
       refreshToken: string,
+      opts: { reconnect?: boolean } = {},
     ): Promise<'connected' | 'scope' | 'disconnected'> {
       const { clientId, clientSecret } = requireConfigured();
       const res = await postForm(
@@ -443,8 +343,8 @@ export function createGmail(deps: GmailDeps) {
         error?: string;
       };
       if (!res.ok || !body.access_token) {
-        deps.log.warn({ status: res.status, error: body.error }, 'sign-in refresh token rejected');
-        throw new GmailConnectError('exchange', 'Google didn’t accept the sign-in token.');
+        deps.log.warn({ status: res.status, error: body.error }, 'refresh token rejected');
+        throw new GmailConnectError('exchange', 'Google didn’t accept the token.');
       }
       if (!body.scope?.split(' ').includes(SEND_SCOPE)) return 'scope';
 
@@ -468,7 +368,7 @@ export function createGmail(deps: GmailDeps) {
         refreshToken,
         accessToken: body.access_token,
         expiresIn: body.expires_in,
-        reactivate: false,
+        reactivate: opts.reconnect === true,
       });
       return saved ? 'connected' : 'disconnected';
     },

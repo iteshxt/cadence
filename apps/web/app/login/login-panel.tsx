@@ -9,7 +9,6 @@ import { GitHubMark, GoogleG } from '@/components/brand/third-party';
 import { Button } from '@/components/ui/button';
 import { ErrorBanner } from '@/components/ui/misc';
 import { publicEnv, safeNext } from '@/lib/env';
-import { getSupabase } from '@/lib/supabase/client';
 
 const rise = (ms: number): CSSProperties => ({ animationDelay: `${ms}ms` });
 
@@ -23,29 +22,11 @@ export function LoginPanel() {
   const [error, setError] = useState<string | null>(params.get('error'));
   const next = safeNext(params.get('next'));
 
-  async function signIn() {
+  // Cadence runs the Google flow itself (tech-spec §6.1), so this is a plain navigation.
+  function signIn() {
     setPending(true);
     setError(null);
-    try {
-      const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
-      const { error: err } = await getSupabase().auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo,
-          // Also ask to send email, so the account becomes a sender at sign-in (PRD SET-1a).
-          scopes: 'https://www.googleapis.com/auth/gmail.send',
-          queryParams: { access_type: 'offline', prompt: 'consent' },
-        },
-      });
-      if (err) throw err;
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? `Couldn’t start Google sign-in: ${err.message}`
-          : 'Couldn’t start Google sign-in.',
-      );
-      setPending(false);
-    }
+    window.location.assign(`/auth/google?next=${encodeURIComponent(next)}`);
   }
 
   return (
