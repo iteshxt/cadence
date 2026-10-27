@@ -6,6 +6,7 @@ import { sql } from 'drizzle-orm';
 import express, { type Express } from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
+import { webOrigins } from './config/env.js';
 import type { Context } from './context.js';
 import { createAuthMiddleware, supabaseVerifier, type VerifyToken } from './middleware/auth.js';
 import { basicAuth } from './middleware/basicAuth.js';
@@ -85,7 +86,7 @@ export function createApp(ctx: Context, opts: AppOptions = {}): Express {
   app.use(helmet());
   app.use(
     cors({
-      origin: ctx.env.WEB_URL.replace(/\/+$/, ''),
+      origin: webOrigins(ctx.env),
       allowedHeaders: ['authorization', 'content-type', 'idempotency-key'],
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
       maxAge: 600,

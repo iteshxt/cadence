@@ -390,6 +390,27 @@ describe('platform', () => {
     expect(res.headers.location).toBe('http://localhost:3000/dashboard/settings?slack=cancelled');
   });
 
+  it('allows every WEB_URL origin through CORS and no others', async () => {
+    const multi = testContext({ WEB_URL: 'https://cadence.example.app,http://localhost:3000' });
+    const multiApp = createApp(multi, { verify, bullBoard: false });
+    try {
+      for (const origin of ['https://cadence.example.app', 'http://localhost:3000']) {
+        const res = await request(multiApp)
+          .options('/api/me')
+          .set('Origin', origin)
+          .set('Access-Control-Request-Method', 'GET');
+        expect(res.headers['access-control-allow-origin']).toBe(origin);
+      }
+      const evil = await request(multiApp)
+        .options('/api/me')
+        .set('Origin', 'https://evil.example')
+        .set('Access-Control-Request-Method', 'GET');
+      expect(evil.headers['access-control-allow-origin']).toBeUndefined();
+    } finally {
+      await multi.close();
+    }
+  });
+
   it('answers unknown routes with the standard error shape', async () => {
     const res = await request(app).get('/api/nope').set(auth(alice));
     expect(res.status).toBe(404);

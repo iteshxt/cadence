@@ -1,6 +1,7 @@
-# API and worker image (same image, two commands). Build from the repo root:
+# API and worker image. Build from the repo root:
 #   docker build -f apps/api/Dockerfile -t cadence-api .
-# Multi-arch friendly: builds natively on the Oracle Ampere (arm64) VM.
+# On Render it runs as one service (RUN_WORKER=true, MIGRATE_ON_START=true, tech-spec §13.2);
+# deploy/docker-compose.prod.yml runs the API and worker as separate containers instead.
 
 FROM node:22-alpine AS base
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH COREPACK_ENABLE_DOWNLOAD_PROMPT=0

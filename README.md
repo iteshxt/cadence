@@ -114,22 +114,19 @@ SEND_DRY_RUN=true pnpm --filter @cadence/api load-test --user you@example.com --
 
 ## Deploy (free tier)
 
-See tech-spec §13.2 for why the setup looks like this. In short, the worker is a long-lived process and Redis needs a free home.
+See tech-spec §13.2 for why the setup looks like this: the website on Vercel, and the API with its worker as one Render free web service.
 
 **Web on Vercel:**
 
 1. Import the repo and set **Root Directory** to `apps/web`.
-2. Add the `NEXT_PUBLIC_*` variables, plus `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (not public). `NEXT_PUBLIC_API_URL` is `https://<your DuckDNS name>`.
+2. Add the `NEXT_PUBLIC_*` variables, plus `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (not public). `NEXT_PUBLIC_API_URL` is the Render service's URL.
 
-**API, worker and Redis on an Oracle Cloud Always Free VM:**
+**API, worker and Redis on Render:**
 
-1. Create an Ampere A1 instance (Ubuntu). Open ports 80 and 443 in the VCN security list and the OS firewall.
-2. Install Docker.
-3. Point a free DuckDNS subdomain at the VM's public IP.
-4. Write `deploy/.env` from the `api` and `deploy` sections of `.env.example`, then start the stack:
-   ```bash
-   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --build
-   ```
-5. Caddy gets a Let's Encrypt certificate automatically. Set `WEB_URL` to the Vercel URL so CORS allows it.
+1. **Redis:** create a **Key Value** instance (Free) with the **noeviction** policy, in the region you'll use for the API. Copy its **internal** URL.
+2. **API:** create a **Web Service** from this repo: runtime **Docker**, Dockerfile path `apps/api/Dockerfile`, Docker build context `.` (the repo root), instance **Free**, health check path `/health`, and Docker command `node dist/src/server.js` (no `sh -c` wrapper, so it receives SIGTERM and drains). Same region as the Key Value.
+3. **Environment:** everything in the `api` section of `.env.example`, with `RUN_WORKER=true`, `MIGRATE_ON_START=true`, `NODE_ENV=production`, `NODE_OPTIONS=--max-old-space-size=384`, `REDIS_URL` = the internal Key Value URL, `DATABASE_URL` = Supabase's **session pooler** string, and `WEB_URL=https://<project>.vercel.app,http://localhost:3000`. Leave `PORT` unset (Render provides it).
+4. **Keep it awake:** a free uptime monitor (cron-job.org or UptimeRobot) requesting `https://<service>.onrender.com/health` every 10 minutes, since free services sleep after 15 idle minutes.
+5. Set `NEXT_PUBLIC_API_URL` in Vercel to `https://<service>.onrender.com` and redeploy the web app.
 
-**Fallback (no Oracle account):** run the same compose file on your own machine and expose the API with an ngrok free static domain instead of Caddy.
+**Alternative: any VM** (for example Oracle Cloud Always Free): write `deploy/.env` from the `api` and `deploy` sections of `.env.example`, point a DuckDNS name at the machine, open ports 80 and 443, and run `docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --build`. Caddy gets a certificate automatically; the API and worker run as separate containers.

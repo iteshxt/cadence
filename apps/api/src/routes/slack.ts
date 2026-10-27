@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { primaryWebUrl } from '../config/env.js';
 import type { Context } from '../context.js';
 import { AppError } from '../lib/errors.js';
 import { currentUser } from '../middleware/auth.js';
@@ -52,7 +53,7 @@ const CallbackQuery = z.object({
 export function slackCallbackRouter(ctx: Context): Router {
   const router = Router();
   router.get('/callback', async (req, res) => {
-    const settings = new URL('/dashboard/settings', ctx.env.WEB_URL);
+    const settings = new URL('/dashboard/settings', primaryWebUrl(ctx.env));
     const q = CallbackQuery.safeParse(req.query);
     if (!q.success || q.data.error || !q.data.code || !q.data.state) {
       settings.searchParams.set(

@@ -534,6 +534,7 @@ This is safe to run any number of times, because the database claim (§7.2 step 
 | Variable | Default | Meaning |
 |---|---|---|
 | `WORKER_CONCURRENCY` | `5` | Parallel jobs per worker process |
+| `MIGRATE_ON_START` | `false` | When `true`, the API applies pending migrations before it starts serving (one plain start command on hosts without a pre-deploy step). |
 | `RUN_WORKER` | `false` | When `true`, the API process also runs the email and notification workers (one service on free hosts, §13.2). The worker entry point (`worker.ts`) stays for running them separately. |
 | `MIN_SEND_GAP_MS` | `2000` | Minimum gap between two sends **from the same sender**, across all workers |
 | `MAX_EMAILS_PER_HOUR_PER_SENDER` | `200` | The **server maximum** for any sender's hourly limit. Each sender's own `hourly_limit` (set in Settings, default 20) is what the Lua script enforces; it is clamped to this maximum when saved and again when sending. |
@@ -692,7 +693,7 @@ This is a product demo, so the hosting goal is **$0 per month**. The worker send
 | Piece | Host | Notes |
 |---|---|---|
 | Web | **Vercel Hobby** | Monorepo root directory `apps/web`. |
-| API + worker | **Render free web service**, Docker, `apps/api/Dockerfile` | One process: `RUN_WORKER=true`. Start command runs the migrations, then the server. `/health` is the health check. 512 MB RAM is ample for Node. |
+| API + worker | **Render free web service**, Docker, `apps/api/Dockerfile` | One process, started as plain `node dist/src/server.js` with `RUN_WORKER=true` and `MIGRATE_ON_START=true`. No shell wrapper: a `sh -c "a && b"` command would receive Render's SIGTERM itself and never pass it on, so in-flight sends would be killed instead of drained. `/health` is the health check. It uses about 300 MB while sending a batch, so `NODE_OPTIONS=--max-old-space-size=384` keeps the heap inside the 512 MB instance. |
 | Redis | **Render free Key Value** (same region, internal URL) | Set the eviction policy to **noeviction** (BullMQ requires it). The free tier **doesn't persist to disk**: a restart empties it. That is safe because Postgres is the source of truth: the reconciler re-creates every pending job at boot (§8). Only the current hour's limiter counters are lost, so a sender may send up to one extra hour's cap around a restart. |
 | Postgres and Auth | **Supabase Free** | Use the **session pooler** connection string (IPv4, port 5432); the direct connection is IPv6-only. Free projects pause after 7 days without activity. |
 | Email | **Gmail API** | Free, within each Gmail account's sending limits. |
@@ -709,6 +710,7 @@ This is a product demo, so the hosting goal is **$0 per month**. The worker send
 PORT=4000
 WEB_URL=http://localhost:3000                  # prod: https://<project>.vercel.app,http://localhost:3000 (first = OAuth redirects)
 RUN_WORKER=false                               # true: run the workers inside the API (Render)
+MIGRATE_ON_START=false                         # true: apply migrations when the API starts (Render)
 DATABASE_URL=postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres  # session pooler
 SUPABASE_URL=https://xxx.supabase.co
 REDIS_URL=redis://localhost:6379

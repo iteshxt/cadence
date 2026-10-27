@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { parseEnv, primaryWebUrl, webOrigins } from '../src/config/env.js';
 import { createCrypto } from '../src/lib/crypto.js';
 import { decodeCursor, encodeCursor } from '../src/lib/cursor.js';
 import { userFromClaims } from '../src/middleware/auth.js';
@@ -97,5 +98,45 @@ describe('pickBucketMs', () => {
   it('picks 30 s for a 3-hour range and stays under 600 buckets', () => {
     expect(pickBucketMs(3 * 3_600_000)).toBe(30_000);
     expect((24 * 3_600_000) / pickBucketMs(24 * 3_600_000)).toBeLessThanOrEqual(600);
+  });
+});
+
+describe('environment', () => {
+  const base = {
+    DATABASE_URL: 'postgres://x',
+    SUPABASE_URL: 'https://x.supabase.co',
+    REDIS_URL: 'redis://x',
+    ENCRYPTION_KEY: randomBytes(32).toString('base64'),
+    STATE_SECRET: 'x'.repeat(40),
+    BULL_BOARD_USER: 'admin',
+    BULL_BOARD_PASS: 'password1',
+  };
+
+  it('reads WEB_URL as a list of origins, the first for redirects', () => {
+    const env = parseEnv({
+      ...base,
+      WEB_URL: 'https://cadence.vercel.app/, http://localhost:3000',
+    });
+    expect(webOrigins(env)).toEqual(['https://cadence.vercel.app', 'http://localhost:3000']);
+    expect(primaryWebUrl(env)).toBe('https://cadence.vercel.app');
+  });
+
+  it('rejects a WEB_URL entry that is not a URL', () => {
+    expect(() => parseEnv({ ...base, WEB_URL: 'https://ok.app,not a url' })).toThrow(/WEB_URL/);
+  });
+
+  it('reads RUN_WORKER and SEND_DRY_RUN as flags, off by default', () => {
+    const off = parseEnv({ ...base, WEB_URL: 'http://localhost:3000' });
+    expect([off.RUN_WORKER, off.SEND_DRY_RUN]).toEqual([false, false]);
+    const on = parseEnv({
+      ...base,
+      WEB_URL: 'http://localhost:3000',
+      RUN_WORKER: 'true',
+      SEND_DRY_RUN: '1',
+    });
+    expect([on.RUN_WORKER, on.SEND_DRY_RUN]).toEqual([true, true]);
+    expect(() =>
+      parseEnv({ ...base, WEB_URL: 'http://localhost:3000', RUN_WORKER: 'yes' }),
+    ).toThrow(/RUN_WORKER/);
   });
 });

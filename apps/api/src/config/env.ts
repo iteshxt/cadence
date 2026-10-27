@@ -14,6 +14,12 @@ for (const rel of ['../../.env', '../../../.env', '../../../../.env', '../../../
 }
 
 const int = (def: number) => z.coerce.number().int().positive().default(def);
+/** "true"/"1" or "false"/"0"/empty; anything else is a configuration error. */
+const flag = z
+  .enum(['true', 'false', '1', '0', ''])
+  .optional()
+  .transform((v) => v === 'true' || v === '1');
+
 const optionalString = z
   .string()
   .optional()
@@ -23,7 +29,13 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   PORT: int(4000),
-  WEB_URL: z.url(),
+  /** Allowed site origins, comma-separated; the first is where OAuth callbacks redirect. */
+  WEB_URL: z
+    .string()
+    .refine(
+      (v) => splitOrigins(v).length > 0 && splitOrigins(v).every((o) => URL.canParse(o)),
+      'WEB_URL must be one or more URLs, separated by commas',
+    ),
   DATABASE_URL: z.string().min(1),
   SUPABASE_URL: z.url(),
   REDIS_URL: z.string().min(1),
@@ -47,15 +59,36 @@ const EnvSchema = z.object({
   GOOGLE_CLIENT_ID: optionalString,
   GOOGLE_CLIENT_SECRET: optionalString,
   /** Record sends without calling Gmail (load test, local runs without Google). Never in production. */
-  SEND_DRY_RUN: z
-    .enum(['true', 'false', '1', '0', ''])
-    .optional()
-    .transform((v) => v === 'true' || v === '1'),
+  SEND_DRY_RUN: flag,
+  /** Run the email and notification workers inside the API process (one service on Render). */
+  RUN_WORKER: flag,
+  /**
+   * Apply database migrations before the API starts serving. Lets a host run one plain
+   * `node dist/src/server.js` (no shell wrapper that would swallow SIGTERM).
+   */
+  MIGRATE_ON_START: flag,
   BULL_BOARD_USER: z.string().min(1),
   BULL_BOARD_PASS: z.string().min(8, 'BULL_BOARD_PASS must be at least 8 characters'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
+
+function splitOrigins(value: string): string[] {
+  return value
+    .split(',')
+    .map((o) => o.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+}
+
+/** Every origin the browser may call the API from (CORS). */
+export function webOrigins(env: Pick<Env, 'WEB_URL'>): string[] {
+  return splitOrigins(env.WEB_URL);
+}
+
+/** The site OAuth callbacks send people back to: the first `WEB_URL` entry. */
+export function primaryWebUrl(env: Pick<Env, 'WEB_URL'>): string {
+  return webOrigins(env)[0]!;
+}
 
 export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
   const result = EnvSchema.safeParse(source);
