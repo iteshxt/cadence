@@ -65,7 +65,7 @@ These are non-negotiable and any design that violates them is wrong.
 | C8 | Frontend in **Next.js + Tailwind + TypeScript** |
 | C9 | **Real Google OAuth** (no mock) |
 | C10 | **Real Slack OAuth** plus a live Slack message when a sender's hourly limit is hit |
-| C11 | Emails are searchable through **Elasticsearch** |
+| C11 | Emails are searchable by recipient, subject, and message, with **Postgres full-text and trigram search** (no separate search service) |
 | C12 | **Live BullMQ dashboard** exposed |
 
 ## 6. Functional requirements
@@ -124,14 +124,13 @@ A **campaign** is one compose action. It contains one subject, one body, many re
 | SNT-4 | A **View** link opens the sent message in the sender's Gmail. | P1 |
 | SNT-5 | Failed rows show the error reason. | P1 |
 
-### 6.5 Search (Elasticsearch)
+### 6.5 Search (Postgres)
 
 | ID | Requirement | Priority |
 |---|---|---|
-| SRC-1 | Every email is indexed in Elasticsearch on creation and on every status change. | P0 |
-| SRC-2 | A search bar in the dashboard supports full-text search over recipient, subject, and body, filtered by status. | P0 |
+| SRC-1 | Search reads Postgres directly, so results always match the latest status. There is no separate index to keep in sync or rebuild. | P0 |
+| SRC-2 | A search bar in the dashboard supports full-text search over recipient, subject, and body, filtered by status. Part of an address finds it ("acme" finds jane@acme.com). Matches are highlighted. | P0 |
 | SRC-3 | Search results are scoped to the signed-in user. | P0 |
-| SRC-4 | A reindex script rebuilds the index from Postgres. | P1 |
 
 ### 6.6 Scheduler and delivery
 
@@ -210,7 +209,7 @@ Full details are in tech-spec §6 and design.md §8.
 | `/dashboard` | Redirects to `/dashboard/scheduled` | Private |
 | `/dashboard/scheduled` | Pace strip, readouts, and the scheduled emails table grouped by hour | Private |
 | `/dashboard/sent` | Sent emails table | Private |
-| `/dashboard/search` | Elasticsearch-backed search results | Private |
+| `/dashboard/search` | Search results (Postgres full-text and trigram search) | Private |
 | `/dashboard/settings` | Gmail senders (connect, edit, disconnect), campaign defaults, Slack, and server limits (read-only) | Private |
 | _Compose panel_ | Side panel with a live preview, opens over any dashboard page (`?compose=1`) | Private |
 
@@ -249,19 +248,19 @@ Full details are in tech-spec §6 and design.md §8.
 - **No SMTP.** The Gmail API is HTTPS, so hosts that block outbound SMTP no longer matter for sending.
 - **One user is one tenant.** Slack connections and campaigns belong to a user.
 - **Campaign pacing is planned and sender caps are enforced.** A campaign's own delay and hourly limit decide its planned send times. Deferral exists for the shared per-sender cap, so the Scheduled tab shows real times rather than mostly `deferred` rows.
-- **Deployment is free-tier only:** the web app runs on Vercel Hobby. The API, worker, Redis and Elasticsearch run with Docker Compose on an Oracle Cloud Always Free VM, behind Caddy with HTTPS. Postgres and Auth are on Supabase Free. The VM keeps Redis and Elasticsearch on the free tier. See tech-spec §13.2.
+- **Deployment is free-tier only:** the web app runs on Vercel Hobby. The API, worker, and Redis run with Docker Compose on an Oracle Cloud Always Free VM, behind Caddy with HTTPS. Postgres and Auth are on Supabase Free. The VM keeps Redis on the free tier. See tech-spec §13.2.
 - **design.md is the source of truth** for the UI: tokens, components, and page layouts.
 
 ## 11. Milestones (48 hours)
 
 | # | Window | Deliverable |
 |---|---|---|
-| M0 | 0–2 h | Monorepo scaffold, Docker Compose (Redis + Elasticsearch), Supabase project (confirm JWKS returns keys), Google provider, env templates. Provision the Oracle VM. |
+| M0 | 0–2 h | Monorepo scaffold, Docker Compose (Redis), Supabase project (confirm JWKS returns keys), Google provider, env templates. Provision the Oracle VM. |
 | M1 | 2–10 h | Database schema and migrations, campaign API, scheduler (enqueue), worker (send through the Gmail API), idempotent claims |
 | M2 | 10–16 h | Rate limiter (Lua), minimum gap, deferral logic, startup reconciler, restart tests |
 | M3 | 16–26 h | Next.js landing, login, dashboard, compose, and tables, wired to the API |
 | M4 | 26–32 h | Slack OAuth, notifications queue, and settings page |
-| M5 | 32–37 h | Elasticsearch indexing, search UI, and Bull Board |
+| M5 | 32–37 h | Postgres search, search UI, and Bull Board |
 | M6 | 37–43 h | Polish (empty, loading, and error states), tests, load script, deployment (Vercel + VM compose + Caddy/DuckDNS) |
 | M7 | 43–48 h | README, architecture diagram, walkthrough video, launch |
 

@@ -21,25 +21,25 @@
 │                     Express API (apps/api)                        │
 │  /api/campaigns  /api/emails  /api/search  /api/integrations/slack│
 │  /admin/queues (Bull Board, basic auth)      /health              │
-└───────┬───────────────────┬───────────────────┬──────────────────┘
-        │ Drizzle ORM       │ BullMQ add/addBulk│ index/search
-        ▼                   ▼                   ▼
-┌──────────────┐   ┌──────────────────┐   ┌───────────────┐
-│  Supabase    │   │      Redis       │   │ Elasticsearch │
-│  Postgres    │   │ queues + limiter │   │  emails index │
-│ (source of   │   │ counters (AOF on)│   └───────▲───────┘
-│  truth)      │   └────────┬─────────┘           │
-└──────▲───────┘            │ jobs                │
-       │                    ▼                     │
-       │        ┌─────────────────────────┐       │
-       └────────│  Worker (apps/api,      │───────┘
+└───────┬───────────────────┬──────────────────────────────────────┘
+        │ Drizzle ORM       │ BullMQ add/addBulk
+        │ (incl. search)    ▼
+┌──────────────┐   ┌──────────────────┐
+│  Supabase    │   │      Redis       │
+│  Postgres    │   │ queues + limiter │
+│ (source of   │   │ counters (AOF on)│
+│  truth)      │   └────────┬─────────┘
+└──────▲───────┘            │ jobs
+       │                    ▼
+       │        ┌─────────────────────────┐
+       └────────│  Worker (apps/api,      │
                 │  entry: worker.ts)      │
                 │  email-send queue       │──▶ Gmail API (users' senders)
                 │  notifications queue    │──▶ Slack Incoming Webhook
                 └─────────────────────────┘
 ```
 
-**Key principle:** **Postgres is the source of truth.** Redis holds the *schedule* (delayed jobs) and the *limiter state*. Elasticsearch is a *derived read model*. Any Redis or Elasticsearch state can be rebuilt from Postgres.
+**Key principle:** **Postgres is the source of truth.** Redis holds the *schedule* (delayed jobs) and the *limiter state*, and any of it can be rebuilt from Postgres. Search runs in Postgres too (§11), so there is no second copy of the data to keep in sync.
 
 ## 2. Tech stack
 
@@ -60,11 +60,11 @@
 | Queue | **BullMQ** + **ioredis** | Delayed jobs, retries, stalled-job recovery |
 | Queue UI | **@bull-board/express** | Live dashboard |
 | Email | **Gmail API** (OAuth `gmail.send`), MIME built with Nodemailer's `MailComposer` | Sends from each user's own Gmail account |
-| Search | **Elasticsearch 8** + `@elastic/elasticsearch` | Full-text search over email history |
+| Search | **Postgres** full-text search (`tsvector`, GIN) and trigram matching (`pg_trgm`) | Search over email history with no extra service or memory |
 | JWT verification | **jose** (JWKS) | Verifies Supabase tokens without a network call per request |
 | Logging | **pino** + pino-http | Structured JSON logs |
 | Testing | **Vitest** + **Supertest** + **testcontainers** (Redis) | Unit and integration tests |
-| Infrastructure | **Docker Compose** (Redis 7, Elasticsearch 8; in production also the API, the worker, and Caddy) | One command to start, locally and on the free VM (§13) |
+| Infrastructure | **Docker Compose** (Redis 7; in production also the API, the worker, and Caddy) | One command to start, locally and on the free VM (§13) |
 | Hosting | **Vercel Hobby** (web) + **Oracle Cloud Always Free VM** (everything else) + **Supabase Free** | $0. See §13 for why the backend can't go on Vercel or a free PaaS. |
 
 ## 3. Repository layout
@@ -114,7 +114,7 @@ cadence/
 │     │  │  ├─ emails.repo.ts          # every read/write of `emails` (API, worker, reconciler)
 │     │  │  ├─ gmail.service.ts        # Gmail OAuth, token cache, send, error classes (§7.3)
 │     │  │  ├─ ratelimit.service.ts    # Lua slot reservation, deferral and alert bookkeeping
-│     │  │  ├─ search.service.ts       # ES index/query
+│     │  │  ├─ search.service.ts       # Postgres search + highlighting (§11)
 │     │  │  ├─ slack.service.ts        # OAuth + webhook posts
 │     │  │  ├─ timeline.service.ts     # pace strip data
 │     │  │  ├─ senders.service.ts      # the user's senders: list with usage, edit, disconnect
@@ -124,18 +124,18 @@ cadence/
 │     │  ├─ jobs/{sendEmail.processor,notify.processor}.ts
 │     │  ├─ lua/reserve_send.lua
 │     │  └─ lib/{crypto,logger,errors,cursor}.ts
-│     ├─ scripts/{reindex,load-test}.ts
+│     ├─ scripts/load-test.ts
 │     ├─ test/                   # vitest + supertest + testcontainers
 │     └─ Dockerfile
 ├─ packages/
 │  └─ shared/                    # Zod schemas, DTO types, constants, pacing math
 │     └─ src/{schemas,types,constants,email,pacing}.ts
 ├─ deploy/
-│  ├─ docker-compose.prod.yml    # redis + elasticsearch + migrate + api + worker + caddy (on the VM)
+│  ├─ docker-compose.prod.yml    # redis + migrate + api + worker + caddy (on the VM)
 │  └─ Caddyfile                  # automatic HTTPS for the API
 ├─ docs/
 │  └─ prd.md · tech-spec.md · design.md
-├─ docker-compose.yml            # local: redis + elasticsearch (+ postgres with --profile localdb)
+├─ docker-compose.yml            # local: redis (+ postgres with --profile localdb)
 ├─ turbo.json · pnpm-workspace.yaml · .env.example
 ├─ CLAUDE.md · README.md
 ```
@@ -211,7 +211,7 @@ create table emails (
   error           text,
   defer_scope     text,                   -- 'sender' | 'campaign'; UI builds the tooltip copy
   defer_limit     int,                    -- the cap that was hit, e.g. 200
-  version         int not null default 1, -- +1 on every update; Elasticsearch external version
+  version         int not null default 1, -- +1 on every update (a cheap change counter)
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
   unique (campaign_id, recipient)         -- no duplicate recipient per campaign
@@ -260,7 +260,7 @@ The base URL is `/api`. Every route except health, the Slack and Gmail callbacks
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/health` | Liveness, plus Redis, database, and Elasticsearch checks |
+| GET | `/health` | Liveness, plus Redis and database checks |
 | GET | `/api/me` | Profile (upserted by the auth middleware) |
 | GET | `/api/config` | Read-only server limits for the UI: `{ workerConcurrency, minSendGapMs, maxPerHourPerSender, maxRecipients, startGraceMs }`. `maxPerHourPerSender` is the ceiling for each sender's own limit. |
 | GET | `/api/senders` | The user's active senders (no secrets): `{ id, label, fromEmail, displayName, cap, status: 'connected' \| 'reconnect', usedThisHour, resetsAt }` |
@@ -276,7 +276,7 @@ The base URL is `/api`. Every route except health, the Slack and Gmail callbacks
 | POST | `/api/emails/:id/cancel` | Cancel a scheduled or deferred email (P2) |
 | GET | `/api/stats` | `{ scheduled, deferred, sending, sentToday, sentLastHour, sentTotal, failed, nextSendAt, lastPlannedAt }` ("today" is the UTC day; `sentTotal` counts `sent` + `failed` for the Sent nav count; `nextSendAt` / `lastPlannedAt` are the min / max `next_attempt_at` of pending emails, for the "Next send" and "Finishes around" readouts) |
 | GET | `/api/timeline` | `?from=&to=` → data for the pace strip (see below) |
-| GET | `/api/search` | `?q=&status=&cursor=` (Elasticsearch) |
+| GET | `/api/search` | `?q=&status=&cursor=` (Postgres, §11) |
 | GET | `/api/integrations/slack` | `{ connected, teamName?, channelName? }` |
 | POST | `/api/integrations/slack/authorize` | Returns `{ url }` (Slack authorize URL with signed state) |
 | GET | `/api/integrations/slack/callback` | Slack redirect target. Exchanges the code, stores the connection, then redirects to `/dashboard/settings?slack=connected` |
@@ -413,7 +413,7 @@ Hourly limit          [ 100 ] emails per hour
 
 ### 6.4 State, data, and error handling
 
-- TanStack Query keys: `['emails', view, cursor]`, `['stats']`, `['timeline', from, to]`, `['search', q, status]`, `['slack']`, `['senders']`, `['config']`.
+- TanStack Query keys: `['emails', view, cursor]`, `['stats']`, `['timeline', from, to]`, `['search', q, status, cursor]`, `['slack']`, `['senders']`, `['config']`.
 - Polling: `refetchInterval: 5000` on scheduled, stats, and timeline, paused when the document is hidden.
 - `api.ts` throws a typed `ApiError`. A 401 triggers sign-out and a redirect. Other errors show a sonner toast with `error.message`.
 - Every list has three states: a skeleton (5 rows), an empty state (illustration-free icon, title, body, and call to action), and an inline error with Retry.
@@ -439,8 +439,6 @@ Hourly limit          [ 100 ] emails per hour
        removeOnComplete: { age: 86400, count: 10000 },
        removeOnFail: { age: 7 * 86400 } } }
    ```
-5. Index the emails in Elasticsearch with a bulk request (fire and forget, logging any failure). Every write is versioned (§11), so this can safely race with the worker's updates.
-
 If the process dies between steps 3 and 4, the rows exist without jobs. The **reconciler** (§8) fixes this when the API or the worker next boots, so creation is crash-safe.
 
 ### 7.2 The worker (`sendEmail.processor.ts`)
@@ -473,12 +471,10 @@ Processor steps for `{ emailId }`:
 5. **Send** through the Gmail API (§7.3) from the email's sender. The MIME message carries `Message-ID: <emailId@cadence.local>`, which is deterministic.
 6. **On success:**
    - Update the row: `status='sent'`, `sent_at = finished_at = now()`, `message_id` (the Gmail message ID), `preview_url` (a link that opens the message in the sender's Gmail).
-   - Update the Elasticsearch document.
 7. **On a send error**, classify it with `classifySendError` (§7.3):
    - **Retryable:** Gmail certainly did not accept the message: the access-token refresh failed, the connection was refused before the request was sent, or Gmail answered `401`, `429`, or a rate-limit `403`. If attempts remain, revert the row to `scheduled` (clearing `claimed_at` and `job.data.slotAt`) and rethrow so BullMQ retries with backoff.
    - **Ambiguous:** Gmail may have accepted it: a `5xx`, a timeout, or a connection dropped after the request went out. Retrying could send a duplicate, so mark it `failed` with error `ambiguous: <message>` and do not retry. This is the PRD's at-most-once trade-off.
    - **Permanent** (`400`, other `4xx`, or revoked access), or the final attempt: mark it `failed` with the error message and set `finished_at`. Revoked access also marks the sender `needs_reconnect`.
-   - Update the Elasticsearch document in every case.
 8. **Any other error** (the database or Redis is briefly unavailable, or a bug): if attempts remain, rethrow so BullMQ retries. On the final attempt, make a best-effort update that marks the row `failed` with the reason, so a row never stays `scheduled` behind a failed BullMQ job. If that update also fails, the reconciler repairs the row on the next boot (§8).
 
 ### 7.3 Gmail (`gmail.service.ts`)
@@ -519,7 +515,6 @@ Processor steps for `{ emailId }`:
 | **Job stalls twice** | BullMQ fails the job (`maxStalledCount: 1`). The row may be left in `sending`. The reconciler marks it `failed` (`interrupted`) on the next boot. |
 | **Redis restarts** | Redis runs with `appendonly yes`, `appendfsync everysec` and `maxmemory-policy noeviction` (BullMQ requires that), so delayed jobs survive. |
 | **Redis data wiped** | The reconciler re-creates every missing job from Postgres (see below). |
-| **Elasticsearch is down** | Indexing failures are logged and the email pipeline is unaffected. `pnpm reindex` rebuilds the index from Postgres. |
 
 **Reconciler (`reconciler.service.ts`).** It runs **once at startup of both the API and the worker**, not on a timer, so it complies with the no-cron rule. Running it in the API too covers a crash between commit and `addBulk` (§7.1), which can happen even if the worker never restarts. A Redis lock (`SET reconcile:lock NX EX 60`) makes sure only one process runs it at a time. It does three things:
 
@@ -642,30 +637,29 @@ The script `pnpm load-test --count 1000 --start now` makes this reproducible. It
    - If Slack returns 404 or `invalid_token`, delete the connection and mark the user disconnected.
 5. **Disconnect:** call `auth.revoke` with the token (best effort), then delete the row.
 
-## 11. Elasticsearch
+## 11. Search (Postgres)
 
-**Index:** `cadence-emails-v1` with the alias `cadence-emails`.
+Search runs in the same Postgres database as everything else: no search service, no index to keep in sync, and results always show the current status. At Cadence's scale (tens of thousands of emails per user) it is fast with two indexes:
 
-```json
-{ "mappings": { "properties": {
-  "id": {"type":"keyword"}, "userId": {"type":"keyword"},
-  "campaignId": {"type":"keyword"}, "status": {"type":"keyword"},
-  "recipient": {"type":"text","fields":{"raw":{"type":"keyword"}}},
-  "subject": {"type":"text"}, "body": {"type":"text"},
-  "senderLabel": {"type":"keyword"},
-  "scheduledAt": {"type":"date"}, "sentAt": {"type":"date"}
-}}}
+```sql
+create extension if not exists pg_trgm;
+-- Subject and message words, weighted so subject matches rank higher.
+alter table campaigns add column search_tsv tsvector generated always as
+  (setweight(to_tsvector('simple', subject), 'A') || setweight(to_tsvector('simple', body), 'B')) stored;
+create index campaigns_search_tsv on campaigns using gin (search_tsv);
+-- Any part of an address: "acme" finds jane@acme.com.
+create index emails_recipient_trgm on emails using gin ((recipient::text) gin_trgm_ops);
 ```
 
-- **Writes:** every write is a **full-document `index`**, built from the current Postgres row, with `version_type: external` and `version = emails.version`. That includes the bulk write at campaign creation and every status change from the worker. Elasticsearch rejects any write older than the stored version with a `409`, which we ignore. This means a slow creation bulk can never overwrite a newer `sent` status, and a worker update never fails with "document missing". The document ID is the email ID, so writes are idempotent.
-- **Hosting:** self-hosted Elasticsearch 8 (single node, `xpack.security.enabled=false`, bound to the Docker network only, heap `-Xms1g -Xmx1g`) in the VM's compose stack. Free managed options were rejected: Elastic Cloud is a 14-day trial, and Bonsai's free sandbox runs Elasticsearch 7.10, which the v8 `@elastic/elasticsearch` client refuses to talk to.
-- **Query:** a `bool` query with `filter: [term userId, terms status?]` and `must: multi_match(q, [recipient^3, subject^2, body])`, plus highlighting. Pagination uses `search_after`.
-- **Reindex:** `scripts/reindex.ts` streams from Postgres into a new index version and swaps the alias.
+- **Query** (`search.service.ts`), always filtered by `user_id` and the optional status: an email matches when its recipient contains the text (`recipient::text ILIKE '%q%'`, served by the trigram index; `%`, `_` and `\` in the text are escaped), its subject contains it, or its campaign's `search_tsv` matches `websearch_to_tsquery('simple', q)` (so quoted phrases and `-word` work). The `simple` configuration keeps words as typed, without language stemming, which suits names and addresses.
+- **Ranking:** an exact recipient first, then a recipient containing the text, then `ts_rank` on subject and message; ties by ID. `count(*) over ()` gives the total in the same query.
+- **Paging:** an opaque cursor holding the offset. Search results are a few pages at most, so offsets are cheap here, unlike the main tables (§5), which use keyset cursors.
+- **Highlights** are built in the API, not in SQL: the text is HTML-escaped first and only then are the matched words wrapped in `<mark>`, so a subject like `<script>` can never reach the page as markup. The message gets one ~120-character fragment around its first match. The web app renders these strings as-is.
 
 ## 12. Security
 
 - **JWT:** verified with `jose.createRemoteJWKSet(${SUPABASE_URL}/auth/v1/.well-known/jwks.json)`, checking `aud=authenticated` and `iss=${SUPABASE_URL}/auth/v1`. `req.user = { id, email, fullName, avatarUrl }`. This requires the project to use **asymmetric JWT signing keys**, which is the default for projects created since late 2025. In M0, confirm under *Project Settings → JWT Keys* that the JWKS endpoint returns at least one key. If it returns an empty `keys` array, the project is still on the legacy shared secret and must be migrated before any API call will authenticate.
-- **Authorization:** every query filters by `user_id = req.user.id`. Elasticsearch queries are always filtered by `userId`.
+- **Authorization:** every query filters by `user_id = req.user.id`. Search queries are filtered the same way.
 - **Secrets:** Gmail refresh tokens and Slack tokens are encrypted with AES-256-GCM using `ENCRYPTION_KEY` (32 bytes, base64). Access tokens live only in worker memory.
 - **Google user data:** only the address, name, and the `gmail.send` permission are requested, used solely to send the user's own campaigns, never shared or used for anything else (Google API Services User Data Policy, Limited Use). Disconnecting revokes access.
 - **HTTP:** `helmet`, CORS restricted to `WEB_URL`, a 1 MB JSON limit, and `express-rate-limit` on `POST /api/campaigns` (10 requests per minute per user).
@@ -679,7 +673,7 @@ The script `pnpm load-test --count 1000 --start now` makes this reproducible. It
 ### 13.1 Local
 
 ```bash
-docker compose up -d                  # redis (AOF, noeviction) + elasticsearch (single-node, security off)
+docker compose up -d                  # redis (AOF, noeviction)
                                       # add --profile localdb for a local Postgres instead of Supabase
 pnpm i
 pnpm --filter api db:migrate
@@ -688,7 +682,7 @@ pnpm dev                              # turbo: web :3000, api :4000, worker
 
 ### 13.2 Hosted (all free tiers)
 
-This is a product demo, so the hosting goal is **$0 per month**. The worker sends over HTTPS (the Gmail API), so outbound SMTP no longer constrains hosting. What still drives the choice is that **the worker is a long-lived process (BullMQ)** and Redis and Elasticsearch must run somewhere free:
+This is a product demo, so the hosting goal is **$0 per month**. The worker sends over HTTPS (the Gmail API), so outbound SMTP no longer constrains hosting. What still drives the choice is that **the worker is a long-lived process (BullMQ)** and Redis must run somewhere free:
 
 - **Vercel** can't run the API or worker. Functions are short-lived and can't hold a BullMQ worker. It is perfect for the Next.js app.
 - **Render's free tier** sleeps idle services, which stops the worker.
@@ -699,7 +693,7 @@ This is a product demo, so the hosting goal is **$0 per month**. The worker send
 | Piece | Host | Notes |
 |---|---|---|
 | Web | **Vercel Hobby** | Monorepo root directory `apps/web`. Hobby is non-commercial, which suits a demo. |
-| API, worker, Redis, Elasticsearch | **Oracle Cloud Always Free** Ampere A1 VM (up to 4 OCPU / 24 GB RAM, arm64) running `deploy/docker-compose.prod.yml` | Two services from the same image (`start:api`, `start:worker`), Redis 7 with AOF and `noeviction`, Elasticsearch 8. All images have arm64 builds. Only Caddy's ports 80 and 443 are open in the VCN security list. |
+| API, worker, Redis | **Oracle Cloud Always Free** Ampere A1 VM (up to 4 OCPU / 24 GB RAM, arm64) running `deploy/docker-compose.prod.yml` | Two services from the same image (`start:api`, `start:worker`). Redis 7 with AOF and `noeviction`. All images have arm64 builds. Only Caddy's ports 80 and 443 are open in the VCN security list. |
 | HTTPS for the API | **Caddy** + a free **DuckDNS** subdomain (e.g. `cadence-api.duckdns.org`) | Automatic Let's Encrypt certificates. HTTPS is required: the Vercel site can't call a plain-HTTP API (mixed content), and Slack requires an HTTPS redirect URL. |
 | Postgres and Auth | **Supabase Free** | Use the **session pooler** connection string (IPv4, port 5432). The direct connection is IPv6-only. Free projects pause after 7 days without activity, so open the app before a demo. |
 | Email | **Gmail API** | Free, within each Gmail account's sending limits. |
@@ -721,7 +715,6 @@ WEB_URL=http://localhost:3000                  # prod: https://<project>.vercel.
 DATABASE_URL=postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres  # session pooler
 SUPABASE_URL=https://xxx.supabase.co
 REDIS_URL=redis://localhost:6379
-ELASTICSEARCH_URL=http://localhost:9200
 ENCRYPTION_KEY=base64-32-bytes
 STATE_SECRET=random-long-string
 WORKER_CONCURRENCY=5
@@ -752,7 +745,7 @@ GOOGLE_CLIENT_SECRET=
 
 ## 14. Testing strategy
 
-`pnpm test` runs every suite through Turborepo. API integration tests start throwaway Postgres and Redis containers with testcontainers (or reuse `TEST_DATABASE_URL` / `TEST_REDIS_URL`); the Elasticsearch suite runs when `TEST_ELASTICSEARCH_URL` is set.
+`pnpm test` runs every suite through Turborepo. API integration tests start throwaway Postgres and Redis containers with testcontainers (or reuse `TEST_DATABASE_URL` / `TEST_REDIS_URL`); search tests run against the same Postgres.
 
 | Level | What |
 |---|---|
@@ -762,7 +755,7 @@ GOOGLE_CLIENT_SECRET=
 | Integration (Redis) | Lua reservation under 50 parallel calls never exceeds the cap, hands out distinct slots exactly `minGap` apart, charges the slot's hour, reports the right scope, and leaves the gap pointer alone on LIMIT. Deferral positions are monotonic. One alert per user, sender, and hour. Duplicate `addBulk` with the same job ID produces one job. |
 | Integration (worker) | A real BullMQ worker with a fake send function: exactly-once sends on time; two jobs for one email still send once; ten concurrent claims have one winner; overflow deferred to the next hour in planned order with one alert per sender and no failed jobs; a retryable send error is retried once; an ambiguous one is not retried; a disconnected sender's email fails without sending; each sender's own hourly limit is enforced; expired and live leases end as `interrupted` without resending; the reconciler re-adds lost jobs, replaces stale failed jobs, settles expired claims, and is idempotent and locked; 5,000 recipients scheduled in well under 3 seconds; a Slack alert released when not connected; Slack OAuth state, posting, and dead-webhook cleanup. |
 | Integration (API) | Through supertest: auth errors, profile upsert on first call, field-level validation errors, start-time grace and `START_IN_PAST`, `Idempotency-Key` (sequential and a concurrent double-click), sender selection, cursor pagination with totals, cross-user isolation, cancel, stats and timeline, config and senders without secrets, sender edits and disconnect scoped to the owner, settings, health, Bull Board basic auth, Slack not configured, callback redirects. |
-| Integration (Elasticsearch) | Domain search through the address analyzer, subject and body search, user scoping, status filter, stale writes ignored through external versioning, `search_after` paging. |
+| Integration (search) | Part of an address, subject and message words, a quoted phrase, user scoping, status filter, ranking (recipient first), paging with a total, LIKE wildcards in the text treated literally, and highlights that escape HTML. |
 | Integration (Gmail) | OAuth state and callback with a stubbed Google: token exchange, missing `gmail.send` scope, unverified address, reconnect upsert; sending with a stubbed Gmail API: token caching and refresh, MIME and Message-ID, `invalid_grant` marks the sender for reconnect. |
 | End-to-end, manual | Real Gmail sends to your own inbox, the restart test, the rate limit plus Slack, and disconnect/reconnect, scripted in the README. |
 

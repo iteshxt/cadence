@@ -13,7 +13,7 @@ Read the relevant spec section before changing behavior or UI, and update the sp
 ## Rules that are easy to break
 
 - No cron or repeatable jobs, ever. Use delayed jobs and boot-time work only (PRD C5).
-- Postgres is the source of truth. Every write to `emails` bumps `version` and `updated_at` (search writes depend on it).
+- Postgres is the source of truth, search included (tech-spec §11). Every write to `emails` bumps `version` and `updated_at`.
 - The `scheduled|deferred → sending` conditional update is the idempotency guard. Never send without winning it.
 - Only retry send failures where Gmail certainly did not accept the message (`classifySendError`, tech-spec §7.3). Anything ambiguous is marked failed.
 - Senders belong to users. A campaign may only use its owner's active senders, and an email is never moved to another sender.
@@ -26,7 +26,7 @@ Read the relevant spec section before changing behavior or UI, and update the sp
 pnpm dev                                   # web + api (start the worker with: pnpm --filter @cadence/api dev:worker)
 pnpm test                                  # all tests (API tests need Docker; see README)
 pnpm typecheck && pnpm lint && pnpm format:check
-docker compose --profile localdb up -d     # Redis, Elasticsearch, local Postgres
+docker compose --profile localdb up -d     # Redis and a local Postgres
 ```
 
 ## Git
