@@ -248,14 +248,14 @@ Full details are in tech-spec §6 and design.md §8.
 - **No SMTP.** The Gmail API is HTTPS, so hosts that block outbound SMTP no longer matter for sending.
 - **One user is one tenant.** Slack connections and campaigns belong to a user.
 - **Campaign pacing is planned and sender caps are enforced.** A campaign's own delay and hourly limit decide its planned send times. Deferral exists for the shared per-sender cap, so the Scheduled tab shows real times rather than mostly `deferred` rows.
-- **Deployment is free-tier only:** the web app runs on Vercel Hobby. The API, worker, and Redis run with Docker Compose on an Oracle Cloud Always Free VM, behind Caddy with HTTPS. Postgres and Auth are on Supabase Free. The VM keeps Redis on the free tier. See tech-spec §13.2.
+- **Deployment is free-tier only:** the web app runs on Vercel Hobby. The API and worker run as one Render free web service (kept awake by an uptime pinger), with Render's free Redis. Postgres and Auth are on Supabase Free. See tech-spec §13.2.
 - **design.md is the source of truth** for the UI: tokens, components, and page layouts.
 
 ## 11. Milestones (48 hours)
 
 | # | Window | Deliverable |
 |---|---|---|
-| M0 | 0–2 h | Monorepo scaffold, Docker Compose (Redis), Supabase project (confirm JWKS returns keys), Google provider, env templates. Provision the Oracle VM. |
+| M0 | 0–2 h | Monorepo scaffold, Docker Compose (Redis), Supabase project (confirm JWKS returns keys), Google provider, env templates. Create the Render service. |
 | M1 | 2–10 h | Database schema and migrations, campaign API, scheduler (enqueue), worker (send through the Gmail API), idempotent claims |
 | M2 | 10–16 h | Rate limiter (Lua), minimum gap, deferral logic, startup reconciler, restart tests |
 | M3 | 16–26 h | Next.js landing, login, dashboard, compose, and tables, wired to the API |

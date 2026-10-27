@@ -65,7 +65,7 @@
 | Logging | **pino** + pino-http | Structured JSON logs |
 | Testing | **Vitest** + **Supertest** + **testcontainers** (Redis) | Unit and integration tests |
 | Infrastructure | **Docker Compose** (Redis 7; in production also the API, the worker, and Caddy) | One command to start, locally and on the free VM (§13) |
-| Hosting | **Vercel Hobby** (web) + **Oracle Cloud Always Free VM** (everything else) + **Supabase Free** | $0. See §13 for why the backend can't go on Vercel or a free PaaS. |
+| Hosting | **Vercel Hobby** (web) + **Render free web service** (API with the worker inside) and **Render Key Value** (Redis) + **Supabase Free** | $0. See §13.2 for why the backend can't go on Vercel. |
 
 ## 3. Repository layout
 
@@ -534,6 +534,7 @@ This is safe to run any number of times, because the database claim (§7.2 step 
 | Variable | Default | Meaning |
 |---|---|---|
 | `WORKER_CONCURRENCY` | `5` | Parallel jobs per worker process |
+| `RUN_WORKER` | `false` | When `true`, the API process also runs the email and notification workers (one service on free hosts, §13.2). The worker entry point (`worker.ts`) stays for running them separately. |
 | `MIN_SEND_GAP_MS` | `2000` | Minimum gap between two sends **from the same sender**, across all workers |
 | `MAX_EMAILS_PER_HOUR_PER_SENDER` | `200` | The **server maximum** for any sender's hourly limit. Each sender's own `hourly_limit` (set in Settings, default 20) is what the Lua script enforces; it is clamped to this maximum when saved and again when sending. |
 | `GLOBAL_LIMITER_MAX` / `GLOBAL_LIMITER_DURATION_MS` | `10` / `1000` | BullMQ queue-wide limiter, an extra safety net for the email provider |
@@ -662,7 +663,7 @@ create index emails_recipient_trgm on emails using gin ((recipient::text) gin_tr
 - **Authorization:** every query filters by `user_id = req.user.id`. Search queries are filtered the same way.
 - **Secrets:** Gmail refresh tokens and Slack tokens are encrypted with AES-256-GCM using `ENCRYPTION_KEY` (32 bytes, base64). Access tokens live only in worker memory.
 - **Google user data:** only the address, name, and the `gmail.send` permission are requested, used solely to send the user's own campaigns, never shared or used for anything else (Google API Services User Data Policy, Limited Use). Disconnecting revokes access.
-- **HTTP:** `helmet`, CORS restricted to `WEB_URL`, a 1 MB JSON limit, and `express-rate-limit` on `POST /api/campaigns` (10 requests per minute per user).
+- **HTTP:** `helmet`, CORS restricted to the origins in `WEB_URL`, a 1 MB JSON limit, and `express-rate-limit` on `POST /api/campaigns` (10 requests per minute per user).
 - **Bull Board:** basic auth using `BULL_BOARD_USER` and `BULL_BOARD_PASS`.
 - **Slack OAuth:** the signed, expiring `state` protects against CSRF and ties the callback to the user.
 - **Google sign-in and Connect Gmail:** a random `state` and `nonce` in a short-lived httpOnly cookie protect against CSRF and token replay; Supabase verifies the ID token's audience and nonce. The connect call is authenticated with the user's session, so a sender always belongs to the signed-in user.
@@ -682,36 +683,32 @@ pnpm dev                              # turbo: web :3000, api :4000, worker
 
 ### 13.2 Hosted (all free tiers)
 
-This is a product demo, so the hosting goal is **$0 per month**. The worker sends over HTTPS (the Gmail API), so outbound SMTP no longer constrains hosting. What still drives the choice is that **the worker is a long-lived process (BullMQ)** and Redis must run somewhere free:
+This is a product demo, so the hosting goal is **$0 per month**. The worker sends over HTTPS (the Gmail API) and search runs in Postgres (§11), so the backend is one Node process plus Redis, small enough for free platforms. What still drives the choice is that **the worker must stay running** to fire delayed jobs on time.
 
-- **Vercel** can't run the API or worker. Functions are short-lived and can't hold a BullMQ worker. It is perfect for the Next.js app.
-- **Render's free tier** sleeps idle services, which stops the worker.
-- **Railway** has no free tier.
-- **Koyeb's free tier** requires a card, scales to zero, and offers one web service only (no worker type).
-- **Upstash Redis free** (500K commands per month) would be used up by an idle BullMQ worker's polling and stalled-job checks.
+- **Vercel** can't run the backend: functions are short-lived and can't hold a BullMQ worker, and Hobby cron runs at most daily (and C5 rules cron out anyway). It is perfect for the Next.js app.
+- **Render's free web service** runs a normal long-lived process. It sleeps after 15 minutes without requests, so an external uptime pinger (cron-job.org or UptimeRobot hitting `/health` every 10 minutes) keeps it awake; that is the host's keep-alive, not Cadence scheduling, so C5 still holds. One service running all month uses about 744 of the 750 free instance hours, so the **worker runs inside the API process** (`RUN_WORKER=true`) rather than as a second service (Render's background workers aren't free).
+- **Upstash Redis free** (500K commands per month) would be used up by an idle BullMQ worker's polling and stalled-job checks; Render's free Key Value has no command cap.
 
 | Piece | Host | Notes |
 |---|---|---|
-| Web | **Vercel Hobby** | Monorepo root directory `apps/web`. Hobby is non-commercial, which suits a demo. |
-| API, worker, Redis | **Oracle Cloud Always Free** Ampere A1 VM (up to 4 OCPU / 24 GB RAM, arm64) running `deploy/docker-compose.prod.yml` | Two services from the same image (`start:api`, `start:worker`). Redis 7 with AOF and `noeviction`. All images have arm64 builds. Only Caddy's ports 80 and 443 are open in the VCN security list. |
-| HTTPS for the API | **Caddy** + a free **DuckDNS** subdomain (e.g. `cadence-api.duckdns.org`) | Automatic Let's Encrypt certificates. HTTPS is required: the Vercel site can't call a plain-HTTP API (mixed content), and Slack requires an HTTPS redirect URL. |
-| Postgres and Auth | **Supabase Free** | Use the **session pooler** connection string (IPv4, port 5432). The direct connection is IPv6-only. Free projects pause after 7 days without activity, so open the app before a demo. |
+| Web | **Vercel Hobby** | Monorepo root directory `apps/web`. |
+| API + worker | **Render free web service**, Docker, `apps/api/Dockerfile` | One process: `RUN_WORKER=true`. Start command runs the migrations, then the server. `/health` is the health check. 512 MB RAM is ample for Node. |
+| Redis | **Render free Key Value** (same region, internal URL) | Set the eviction policy to **noeviction** (BullMQ requires it). The free tier **doesn't persist to disk**: a restart empties it. That is safe because Postgres is the source of truth: the reconciler re-creates every pending job at boot (§8). Only the current hour's limiter counters are lost, so a sender may send up to one extra hour's cap around a restart. |
+| Postgres and Auth | **Supabase Free** | Use the **session pooler** connection string (IPv4, port 5432); the direct connection is IPv6-only. Free projects pause after 7 days without activity. |
 | Email | **Gmail API** | Free, within each Gmail account's sending limits. |
-| OAuth | Google Cloud (free), Slack app (free) | The Google OAuth client's redirect URIs are the web app's `/auth/google/callback` (`http://localhost:3000/...` and `https://<project>.vercel.app/...`). The web app on Vercel also needs `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. The Gmail API is enabled and `gmail.send` is on the consent screen. Supabase allows the Vercel URL. The Slack redirect points to `https://<duckdns>/api/integrations/slack/callback`. |
+| OAuth | Google Cloud (free), Slack app (free) | The Google OAuth client's redirect URIs are the web app's `/auth/google/callback` (`http://localhost:3000/...` and `https://<project>.vercel.app/...`). The web app on Vercel also needs `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. The Slack redirect points to `https://<api>/api/integrations/slack/callback`. |
 
-**Day-one checks (M0), before writing app code:**
+`WEB_URL` is a comma-separated list of allowed site origins (CORS); the first is where OAuth callbacks redirect. Production lists the Vercel URL first, and may add `http://localhost:3000` so local development can use the hosted API.
 
-1. Confirm that the Supabase JWKS endpoint returns keys (§12).
-2. Oracle needs a card for identity verification (it is not charged on Always Free). Ampere capacity can be "out of host capacity" in busy regions, so try another availability domain or retry later.
-
-**Fallback (no Oracle account):** run `deploy/docker-compose.prod.yml` on your own machine during the demo, with Caddy replaced by an **ngrok** free static domain as the public HTTPS URL. Everything else is unchanged. The downside is that the backend is only up while your machine is.
+**Alternative: a VM.** `deploy/docker-compose.prod.yml` runs the same image as separate API and worker containers with Redis (AOF on) behind Caddy on any machine, such as an Oracle Cloud Always Free VM or your own computer with an ngrok static domain.
 
 ### 13.3 `.env.example`
 
 ```bash
 # api
 PORT=4000
-WEB_URL=http://localhost:3000                  # prod: https://<project>.vercel.app
+WEB_URL=http://localhost:3000                  # prod: https://<project>.vercel.app,http://localhost:3000 (first = OAuth redirects)
+RUN_WORKER=false                               # true: run the workers inside the API (Render)
 DATABASE_URL=postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres  # session pooler
 SUPABASE_URL=https://xxx.supabase.co
 REDIS_URL=redis://localhost:6379
