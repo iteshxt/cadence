@@ -263,7 +263,7 @@ function ComposeForm({
   const onSubmit = handleSubmit((v) => {
     let ok = true;
     if (!recipients) {
-      setRecipientsError('Add a CSV or TXT file with at least one email address.');
+      setRecipientsError('Add at least one recipient: upload a file or type addresses.');
       ok = false;
     }
     if (chosen.length === 0) {

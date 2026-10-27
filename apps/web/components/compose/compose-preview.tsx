@@ -114,7 +114,8 @@ export function ComposePreview({ estimate }: { estimate: ReturnType<typeof useEs
         ]}
         className="sm:gap-x-8"
       />
-      {est.overCapacity && (
+      {/* Only when the plan really moves emails: a short campaign at a high rate fits anyway. */}
+      {est.overCapacity && est.deferredCount > 0 && (
         <p className="text-caption text-deferred">
           Your senders can send {fmtNumber(est.capacityPerHour)} emails an hour in total. The rest
           will move to the next hour.

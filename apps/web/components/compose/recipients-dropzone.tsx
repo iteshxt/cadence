@@ -3,8 +3,10 @@
 import { FileText, Upload, X } from 'lucide-react';
 import { useId, useRef, useState, type DragEvent } from 'react';
 import { cn } from '@/lib/cn';
-import { LeadsFileError, parseLeadsFile, type ParsedLeads } from '@/lib/csv';
+import { LeadsFileError, parseLeadsFile, parseTypedRecipients, type ParsedLeads } from '@/lib/csv';
 import { fmtNumber, plural } from '@/lib/format';
+import { Textarea } from '../ui/input';
+import { Segmented } from '../ui/misc';
 import { Spinner } from '../ui/spinner';
 
 export interface RecipientsFile extends ParsedLeads {
@@ -20,7 +22,33 @@ function fmtSize(bytes: number) {
       : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** Real <input type="file"> behind a dashed drop area; results announced politely (design.md §7.6, §10). */
+type Source = 'file' | 'typed';
+
+/** "1,240 emails ready. Removed 12 duplicates and 3 invalid addresses." Announced politely. */
+function ResultLine({ value }: { value: ParsedLeads }) {
+  return (
+    <p aria-live="polite" className="text-body">
+      <span className="font-semibold text-ink">{fmtNumber(value.emails.length)} emails ready</span>
+      {(value.duplicates > 0 || value.invalid > 0) && (
+        <span className="text-ink-3">
+          {'. Removed '}
+          {[
+            value.duplicates > 0 && plural(value.duplicates, 'duplicate'),
+            value.invalid > 0 && plural(value.invalid, 'invalid address', 'invalid addresses'),
+          ]
+            .filter(Boolean)
+            .join(' and ')}
+          .
+        </span>
+      )}
+    </p>
+  );
+}
+
+/**
+ * Recipients from a file (a real <input type="file"> behind a dashed drop area) or typed in
+ * (design.md §7.6). Both go through the same cleaning; results are announced politely (§10).
+ */
 export function RecipientsDropzone({
   value,
   onChange,
@@ -37,6 +65,33 @@ export function RecipientsDropzone({
   const [over, setOver] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [source, setSource] = useState<Source>('file');
+  const [typed, setTyped] = useState('');
+  const [typedResult, setTypedResult] = useState<ParsedLeads | null>(null);
+
+  const switchSource = (next: Source) => {
+    setSource(next);
+    setFileError(null);
+    setTyped('');
+    setTypedResult(null);
+    onChange(null);
+  };
+
+  const onType = (text: string) => {
+    setTyped(text);
+    try {
+      const parsed = parseTypedRecipients(text);
+      setFileError(null);
+      setTypedResult(parsed.emails.length > 0 || parsed.invalid > 0 ? parsed : null);
+      onChange(
+        parsed.emails.length > 0 ? { ...parsed, name: 'Typed addresses', size: text.length } : null,
+      );
+    } catch (err) {
+      setTypedResult(null);
+      setFileError(err instanceof LeadsFileError ? err.message : 'Couldn’t read these addresses.');
+      onChange(null);
+    }
+  };
 
   async function handle(file: File | undefined) {
     if (!file) return;
@@ -68,10 +123,42 @@ export function RecipientsDropzone({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span id={`${id}-label`} className="text-label text-ink">
-        {label}
-      </span>
-      {value ? (
+      <div className="flex items-center justify-between gap-3">
+        <span id={`${id}-label`} className="text-label text-ink">
+          {label}
+        </span>
+        <Segmented
+          label="How to add recipients"
+          value={source}
+          onChange={switchSource}
+          options={[
+            { value: 'file', label: 'Upload file' },
+            { value: 'typed', label: 'Type addresses' },
+          ]}
+        />
+      </div>
+      {source === 'typed' ? (
+        <div className="flex flex-col gap-2">
+          <Textarea
+            id={`${id}-typed`}
+            rows={4}
+            value={typed}
+            onChange={(e) => onType(e.target.value)}
+            placeholder={'jane@acme.com\nsam@globex.com, lee@initech.com'}
+            aria-labelledby={`${id}-label`}
+            aria-invalid={message ? true : undefined}
+            aria-describedby={message ? `${id}-error` : `${id}-typed-help`}
+            className="min-h-24"
+          />
+          {typedResult && typedResult.emails.length > 0 ? (
+            <ResultLine value={typedResult} />
+          ) : (
+            <p id={`${id}-typed-help`} className="text-caption text-ink-3">
+              One per line, or separated by commas or spaces. Up to 5,000.
+            </p>
+          )}
+        </div>
+      ) : value ? (
         <div className="flex flex-col gap-2">
           <div className="flex h-11 items-center gap-2 rounded-control border border-line bg-surface px-3">
             <FileText aria-hidden strokeWidth={1.5} className="size-4 text-ink-2" />
@@ -86,24 +173,7 @@ export function RecipientsDropzone({
               <X strokeWidth={1.5} className="size-4" />
             </button>
           </div>
-          <p aria-live="polite" className="text-body">
-            <span className="font-semibold text-ink">
-              {fmtNumber(value.emails.length)} emails ready
-            </span>
-            {(value.duplicates > 0 || value.invalid > 0) && (
-              <span className="text-ink-3">
-                {'. Removed '}
-                {[
-                  value.duplicates > 0 && plural(value.duplicates, 'duplicate'),
-                  value.invalid > 0 &&
-                    plural(value.invalid, 'invalid address', 'invalid addresses'),
-                ]
-                  .filter(Boolean)
-                  .join(' and ')}
-                .
-              </span>
-            )}
-          </p>
+          <ResultLine value={value} />
           <details className="text-caption text-ink-2">
             <summary className="cursor-pointer select-none hover:text-ink">
               First 5 recipients

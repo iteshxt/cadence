@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseLeadsText } from './csv';
+import { parseLeadsText, parseTypedRecipients } from './csv';
 
 describe('parseLeadsText', () => {
   it('uses only the email column when the header names one', () => {
@@ -42,5 +42,23 @@ describe('parseLeadsText', () => {
       duplicates: 1,
       invalid: 1,
     });
+  });
+});
+
+describe('parseTypedRecipients', () => {
+  it('splits on new lines, commas, semicolons and spaces, with the same cleaning', () => {
+    expect(
+      parseTypedRecipients('Jane@Acme.com\nsam@globex.com, lee@initech.com;jane@acme.com  nope'),
+    ).toEqual({
+      emails: ['jane@acme.com', 'sam@globex.com', 'lee@initech.com'],
+      duplicates: 1,
+      invalid: 1,
+    });
+  });
+
+  it('returns nothing for blank text and refuses more than 5,000 addresses', () => {
+    expect(parseTypedRecipients('   ').emails).toEqual([]);
+    const many = Array.from({ length: 5001 }, (_, i) => `r${i}@example.com`).join('\n');
+    expect(() => parseTypedRecipients(many)).toThrow(/limit is 5,000/);
   });
 });

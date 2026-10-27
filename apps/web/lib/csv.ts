@@ -66,6 +66,20 @@ export function parseLeadsText(text: string, kind: 'csv' | 'txt'): ParsedLeads {
   return { emails, duplicates, invalid };
 }
 
+/**
+ * Recipients typed or pasted into Compose: separated by new lines, commas, semicolons, or spaces.
+ * Same cleaning as a TXT file. Throws when there are more than the campaign limit.
+ */
+export function parseTypedRecipients(text: string): ParsedLeads {
+  const result = parseLeadsText(text.replace(/\s+/g, '\n'), 'txt');
+  if (result.emails.length > LIMITS.MAX_RECIPIENTS) {
+    throw new LeadsFileError(
+      `That's ${result.emails.length.toLocaleString('en-US')} addresses. The limit is ${LIMITS.MAX_RECIPIENTS.toLocaleString('en-US')} per campaign.`,
+    );
+  }
+  return result;
+}
+
 export async function parseLeadsFile(file: File): Promise<ParsedLeads> {
   const name = file.name.toLowerCase();
   const kind = name.endsWith('.txt') ? 'txt' : name.endsWith('.csv') ? 'csv' : null;

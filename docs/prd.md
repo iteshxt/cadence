@@ -91,7 +91,7 @@ A **campaign** is one compose action. It contains one subject, one body, many re
 |---|---|---|
 | CMP-1 | The user can open **Compose New Email** from a primary button. | P0 |
 | CMP-2 | Fields: **Subject** (required, at most 200 characters) and **Body** (required, plain text, at most 10,000 characters). | P0 |
-| CMP-3 | The user can **upload a CSV or TXT file** of leads. The file is parsed client-side. The form shows the **count of valid emails detected**, plus counts of duplicates and invalid entries removed. | P0 |
+| CMP-3 | The user can **upload a CSV or TXT file** of leads, or **type or paste addresses** (separated by new lines, commas, semicolons, or spaces). The file is parsed client-side. The form shows the **count of valid emails detected**, plus counts of duplicates and invalid entries removed. | P0 |
 | CMP-4 | **Start time**: date and time in the user's local timezone. It must be now or in the future. The server accepts up to 5 minutes in the past and treats it as "now", so "Send now" and slow requests never fail. "Send now" is a shortcut. | P0 |
 | CMP-5 | **Delay between emails** in seconds (minimum 1, default 2, or the user's saved default): the minimum spacing between two emails of this campaign, across all its senders. | P0 |
 | CMP-6 | **Hourly limit**: the maximum number of emails per hour for the whole campaign (default 100 or the user's saved default, range 1–3,600). Delay and hourly limit combine into one spacing, `max(delay, 3600 / hourlyLimit)` seconds, which is shown as "1 email every 36 s". If the plan exceeds what the selected senders may send per hour, the form warns that the extra emails will be deferred. | P0 |
