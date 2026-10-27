@@ -1,47 +1,10 @@
-import { Client, errors, type estypes } from '@elastic/elasticsearch';
 import type { EmailStatus } from '@cadence/shared';
-import type { Logger } from '../lib/logger.js';
+import { sql } from 'drizzle-orm';
+import type { Db } from '../db/client.js';
 import { AppError } from '../lib/errors.js';
 
-export const INDEX_ALIAS = 'cadence-emails';
-
-/** Splits addresses on punctuation so "acme" finds "jane.doe@acme.com". */
-export const INDEX_SETTINGS: estypes.IndicesIndexSettings = {
-  analysis: {
-    tokenizer: { address_parts: { type: 'pattern', pattern: '[^\\p{L}\\p{N}]+' } },
-    analyzer: { address: { type: 'custom', tokenizer: 'address_parts', filter: ['lowercase'] } },
-  },
-};
-
-export const INDEX_MAPPINGS: estypes.MappingTypeMapping = {
-  properties: {
-    id: { type: 'keyword' },
-    userId: { type: 'keyword' },
-    campaignId: { type: 'keyword' },
-    status: { type: 'keyword' },
-    recipient: { type: 'text', analyzer: 'address', fields: { raw: { type: 'keyword' } } },
-    subject: { type: 'text' },
-    body: { type: 'text' },
-    senderLabel: { type: 'keyword' },
-    scheduledAt: { type: 'date' },
-    sentAt: { type: 'date' },
-  },
-};
-
-export interface EmailDoc {
-  id: string;
-  userId: string;
-  campaignId: string;
-  status: EmailStatus;
-  recipient: string;
-  subject: string;
-  body: string;
-  senderLabel: string;
-  scheduledAt: string;
-  sentAt: string | null;
-  /** emails.version; used as the external version so stale writes are rejected (§11). */
-  version: number;
-}
+/** The message fragment shown under a hit: about this many characters around the first match. */
+const FRAGMENT_SIZE = 120;
 
 export interface SearchParams {
   userId: string;
@@ -57,163 +20,137 @@ export interface SearchIdsResult {
   total: number;
 }
 
-export function createSearchClient(node: string, apiKey?: string): Client {
-  return new Client({
-    node,
-    ...(apiKey ? { auth: { apiKey } } : {}),
-    requestTimeout: 5_000,
-    maxRetries: 1,
-  });
+const HTML_ESCAPES: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+};
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]!);
+
+/** `%`, `_` and `\` typed by the user match themselves, not "anything". */
+const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/** The words to mark: the query's terms, without quotes, parentheses, or excluded (`-word`) terms. */
+export function highlightTerms(q: string): string[] {
+  const terms = q
+    .toLowerCase()
+    .replace(/["()]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length > 0 && !t.startsWith('-') && t !== 'or');
+  return [...new Set(terms)];
 }
 
-/** Elasticsearch errors carry the full request (email bodies included); log only what identifies the failure. */
-function briefError(err: unknown) {
-  if (err instanceof Error) {
-    const status = (err as { meta?: { statusCode?: number } }).meta?.statusCode;
-    return { name: err.name, message: err.message, ...(status ? { status } : {}) };
+/**
+ * The text HTML-escaped, with every occurrence of a term wrapped in `<mark>`, or null when nothing
+ * matches. Escaping happens around the marks, so user text never reaches the page as markup.
+ */
+export function highlight(text: string, terms: string[]): string | null {
+  const lower = text.toLowerCase();
+  const ranges: [number, number][] = [];
+  for (const term of terms) {
+    for (let i = lower.indexOf(term); i !== -1; i = lower.indexOf(term, i + term.length)) {
+      ranges.push([i, i + term.length]);
+    }
   }
-  return { message: String(err) };
+  if (ranges.length === 0) return null;
+  ranges.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const r of ranges) {
+    const last = merged.at(-1);
+    if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+    else merged.push([...r]);
+  }
+  let out = '';
+  let at = 0;
+  for (const [start, end] of merged) {
+    out += `${escapeHtml(text.slice(at, start))}<mark>${escapeHtml(text.slice(start, end))}</mark>`;
+    at = end;
+  }
+  return out + escapeHtml(text.slice(at));
 }
 
-export function createSearch(client: Client, log: Logger, alias: string = INDEX_ALIAS) {
-  return {
-    client,
-
-    /** Creates `cadence-emails-v1` behind the alias if no index exists yet. Safe to call at every boot. */
-    async ensureIndex(): Promise<void> {
-      try {
-        if (await client.indices.existsAlias({ name: alias })) return;
-        await client.indices.create({
-          index: `${alias}-v1`,
-          settings: INDEX_SETTINGS,
-          mappings: INDEX_MAPPINGS,
-          aliases: { [alias]: {} },
-        });
-        log.info({ index: `${alias}-v1` }, 'search index created');
-      } catch (err) {
-        if (
-          err instanceof errors.ResponseError &&
-          err.body?.error?.type === 'resource_already_exists_exception'
-        )
-          return;
-        log.warn(
-          { err: briefError(err) },
-          'search index not ready; search will be unavailable until Elasticsearch is reachable',
-        );
-      }
-    },
-
-    /**
-     * Writes full documents with external versioning. A 409 means Elasticsearch already holds a
-     * newer version of that email, which is exactly what we want, so it is ignored. Never throws:
-     * indexing failures must not affect sending (§8).
-     */
-    async indexDocs(docs: EmailDoc[], index = alias): Promise<void> {
-      if (docs.length === 0) return;
-      try {
-        const operations = docs.flatMap(({ version, ...source }) => [
-          { index: { _index: index, _id: source.id, version, version_type: 'external' as const } },
-          source,
-        ]);
-        const res = await client.bulk({ operations });
-        if (res.errors) {
-          const failed = res.items.filter((i) => i.index?.error && i.index.status !== 409);
-          if (failed.length > 0) {
-            log.warn(
-              { failed: failed.length, first: failed[0]?.index?.error },
-              'some search documents failed to index',
-            );
-          }
-        }
-      } catch (err) {
-        log.warn({ err: briefError(err), count: docs.length }, 'search indexing failed');
-      }
-    },
-
-    async search(p: SearchParams): Promise<SearchIdsResult> {
-      const searchAfter = p.cursor ? decodeSearchCursor(p.cursor) : undefined;
-      try {
-        const res = await client.search<Pick<EmailDoc, 'id'>>({
-          index: alias,
-          size: p.limit,
-          track_total_hits: true,
-          _source: ['id'],
-          query: {
-            bool: {
-              filter: [
-                { term: { userId: p.userId } },
-                ...(p.status ? [{ term: { status: p.status } }] : []),
-              ],
-              must: [
-                {
-                  multi_match: {
-                    query: p.q,
-                    fields: ['recipient^3', 'subject^2', 'body'],
-                    type: 'best_fields',
-                    operator: 'and',
-                    lenient: true,
-                  },
-                },
-              ],
-            },
-          },
-          sort: [{ _score: { order: 'desc' } }, { id: { order: 'asc' } }] satisfies estypes.Sort,
-          ...(searchAfter ? { search_after: searchAfter } : {}),
-          highlight: {
-            pre_tags: ['<mark>'],
-            post_tags: ['</mark>'],
-            encoder: 'html',
-            fields: {
-              recipient: {},
-              subject: {},
-              body: { fragment_size: 120, number_of_fragments: 1 },
-            },
-          },
-        });
-        const hits = res.hits.hits;
-        const total =
-          typeof res.hits.total === 'number' ? res.hits.total : (res.hits.total?.value ?? 0);
-        const last = hits.at(-1);
-        return {
-          hits: hits.map((h) => ({
-            id: h._id!,
-            highlights: (h.highlight ?? {}) as Record<string, string[]>,
-          })),
-          nextCursor: hits.length === p.limit && last?.sort ? encodeSearchCursor(last.sort) : null,
-          total,
-        };
-      } catch (err) {
-        log.warn({ err: briefError(err) }, 'search query failed');
-        throw new AppError(
-          503,
-          'SEARCH_UNAVAILABLE',
-          'Search is unavailable right now. Try again in a moment.',
-        );
-      }
-    },
-
-    async ping(): Promise<boolean> {
-      try {
-        return await client.ping();
-      } catch {
-        return false;
-      }
-    },
-  };
+/** A ~120-character highlighted window around the first match in a long text. */
+export function fragment(text: string, terms: string[], size = FRAGMENT_SIZE): string | null {
+  const lower = text.toLowerCase();
+  const first = Math.min(
+    ...terms.map((t) => lower.indexOf(t)).filter((i) => i !== -1),
+    Number.POSITIVE_INFINITY,
+  );
+  if (!Number.isFinite(first)) return null;
+  const start = Math.max(0, first - Math.floor(size / 3));
+  const end = Math.min(text.length, start + size);
+  const marked = highlight(text.slice(start, end), terms);
+  if (!marked) return null;
+  return `${start > 0 ? '…' : ''}${marked}${end < text.length ? '…' : ''}`;
 }
 
-function encodeSearchCursor(sort: unknown[]): string {
-  return Buffer.from(JSON.stringify(sort)).toString('base64url');
+function encodeCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ o: offset })).toString('base64url');
 }
 
-function decodeSearchCursor(raw: string): unknown[] {
+function decodeCursor(raw: string): number {
   try {
-    const v = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
-    if (Array.isArray(v) && v.length === 2) return v;
+    const v = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as { o?: unknown };
+    if (Number.isInteger(v.o) && (v.o as number) >= 0) return v.o as number;
   } catch {
     // fall through
   }
   throw new AppError(400, 'VALIDATION_ERROR', 'Invalid cursor');
+}
+
+/**
+ * Search over the user's emails in Postgres (tech-spec §11): any part of the recipient (trigram
+ * index), the subject, or words of the subject and message (full-text index on the campaign).
+ */
+export function createSearch(deps: { db: Db }) {
+  return {
+    async search(p: SearchParams): Promise<SearchIdsResult> {
+      const offset = p.cursor ? decodeCursor(p.cursor) : 0;
+      const pattern = `%${escapeLike(p.q)}%`;
+      const rows = (await deps.db.execute(sql`
+        select e.id, e.recipient::text as recipient, c.subject, c.body,
+               count(*) over () as total
+        from emails e
+        join campaigns c on c.id = e.campaign_id
+        cross join websearch_to_tsquery('simple', ${p.q}) as query
+        where e.user_id = ${p.userId}
+          ${p.status ? sql`and e.status = ${p.status}` : sql``}
+          and (e.recipient::text ilike ${pattern}
+               or c.subject ilike ${pattern}
+               or c.search_tsv @@ query)
+        order by (lower(e.recipient::text) = lower(${p.q})) desc,
+                 (e.recipient::text ilike ${pattern}) desc,
+                 ts_rank(c.search_tsv, query) desc,
+                 e.id
+        limit ${p.limit} offset ${offset}
+      `)) as unknown as {
+        id: string;
+        recipient: string;
+        subject: string;
+        body: string;
+        total: string | number;
+      }[];
+
+      const terms = highlightTerms(p.q);
+      const total = rows.length > 0 ? Number(rows[0]!.total) : 0;
+      return {
+        hits: rows.map((r) => {
+          const highlights: Record<string, string[]> = {};
+          const recipient = highlight(r.recipient, terms);
+          const subject = highlight(r.subject, terms);
+          const body = fragment(r.body, terms);
+          if (recipient) highlights.recipient = [recipient];
+          if (subject) highlights.subject = [subject];
+          if (body) highlights.body = [body];
+          return { id: r.id, highlights };
+        }),
+        nextCursor: offset + rows.length < total ? encodeCursor(offset + rows.length) : null,
+        total,
+      };
+    },
+  };
 }
 
 export type Search = ReturnType<typeof createSearch>;

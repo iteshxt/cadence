@@ -24,7 +24,6 @@ const emailWorker = new Worker<SendJobData, void, string>(
     repo: ctx.repo,
     rateLimiter: ctx.rateLimiter,
     send: ctx.gmail.send,
-    search: ctx.search,
     notifyQueue: ctx.notifyQueue,
     log: ctx.log.child({ component: 'send' }),
     config: {
@@ -63,13 +62,11 @@ for (const w of [emailWorker, notifyWorker]) {
   w.on('error', (err) => ctx.log.error({ queue: w.name, err }, 'worker error'));
 }
 
-await ctx.search.ensureIndex();
 try {
   await reconcile({
     redis: ctx.redis,
     emailQueue: ctx.emailQueue,
     repo: ctx.repo,
-    search: ctx.search,
     log: ctx.log.child({ component: 'reconciler' }),
     leaseMs: env.SEND_LEASE_MS,
   });

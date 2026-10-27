@@ -18,6 +18,10 @@ const citext = customType<{ data: string }>({
   dataType: () => 'citext',
 });
 
+const tsvector = customType<{ data: string }>({
+  dataType: () => 'tsvector',
+});
+
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
 export const emailStatus = pgEnum('email_status', EMAIL_STATUSES);
@@ -76,9 +80,16 @@ export const campaigns = pgTable(
     intervalMs: integer('interval_ms').notNull(),
     totalCount: integer('total_count').notNull(),
     idempotencyKey: text('idempotency_key'),
+    /** Subject and message words for search, subject weighted higher (tech-spec §11). */
+    searchTsv: tsvector('search_tsv').generatedAlwaysAs(
+      sql`setweight(to_tsvector('simple', subject), 'A') || setweight(to_tsvector('simple', body), 'B')`,
+    ),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
-  (t) => [unique('campaigns_user_idempotency_key').on(t.userId, t.idempotencyKey)],
+  (t) => [
+    unique('campaigns_user_idempotency_key').on(t.userId, t.idempotencyKey),
+    index('campaigns_search_tsv').using('gin', t.searchTsv),
+  ],
 );
 
 export const emails = pgTable(
@@ -120,6 +131,8 @@ export const emails = pgTable(
       .on(t.userId, t.finishedAt.desc(), t.id.desc())
       .where(sql`${t.status} in ('sent', 'failed')`),
     index('emails_status_next').on(t.status, t.nextAttemptAt),
+    // Any part of an address: "acme" finds jane@acme.com (tech-spec §11). Needs pg_trgm.
+    index('emails_recipient_trgm').using('gin', sql`(${t.recipient}::text) gin_trgm_ops`),
     index('emails_sender_finished')
       .on(t.senderId, t.finishedAt)
       .where(sql`${t.status} = 'sent'`),

@@ -19,7 +19,6 @@ import {
   type SenderRow,
 } from '../db/schema.js';
 import { decodeCursor, encodeCursor } from '../lib/cursor.js';
-import type { EmailDoc } from './search.service.js';
 
 const itemColumns = {
   id: emails.id,
@@ -74,7 +73,7 @@ function toItem(r: ItemRow): EmailItem {
   };
 }
 
-/** Every write bumps `version` and `updated_at` (tech-spec §4) so search writes can be versioned. */
+/** Every write bumps `version` and `updated_at` (tech-spec §4). */
 const bump = { version: sql`${emails.version} + 1`, updatedAt: sql`now()` };
 
 export interface SendContext {
@@ -84,36 +83,7 @@ export interface SendContext {
 }
 
 export function createEmailsRepo(db: Db) {
-  async function docs(ids: string[]): Promise<EmailDoc[]> {
-    if (ids.length === 0) return [];
-    const rows = await db
-      .select({
-        id: emails.id,
-        userId: emails.userId,
-        campaignId: emails.campaignId,
-        status: emails.status,
-        recipient: emails.recipient,
-        subject: campaigns.subject,
-        body: campaigns.body,
-        senderLabel: senders.label,
-        scheduledAt: emails.scheduledAt,
-        sentAt: emails.sentAt,
-        version: emails.version,
-      })
-      .from(emails)
-      .innerJoin(campaigns, eq(campaigns.id, emails.campaignId))
-      .innerJoin(senders, eq(senders.id, emails.senderId))
-      .where(inArray(emails.id, ids));
-    return rows.map((r) => ({
-      ...r,
-      scheduledAt: r.scheduledAt.toISOString(),
-      sentAt: r.sentAt?.toISOString() ?? null,
-    }));
-  }
-
   return {
-    docs,
-
     // ---------------------------------------------------------------- reads (API)
 
     async list(

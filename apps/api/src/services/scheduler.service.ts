@@ -17,7 +17,6 @@ import type { Logger } from '../lib/logger.js';
 import { sendJobOptions, type EmailQueue } from '../queues/emailQueue.js';
 import type { EmailsRepo } from './emails.repo.js';
 import type { RateLimiter } from './ratelimit.service.js';
-import type { Search } from './search.service.js';
 import { senderCap } from './senders.service.js';
 
 const INSERT_CHUNK = 1000;
@@ -28,7 +27,6 @@ export interface SchedulerDeps {
   env: Pick<Env, 'START_GRACE_MS' | 'MAX_EMAILS_PER_HOUR_PER_SENDER' | 'MIN_SEND_GAP_MS'>;
   emailQueue: EmailQueue;
   repo: EmailsRepo;
-  search: Search;
   rateLimiter: RateLimiter;
   log: Logger;
   now?: () => number;
@@ -40,8 +38,6 @@ export type CreateResult =
 
 export function createScheduler(deps: SchedulerDeps) {
   const now = deps.now ?? Date.now;
-  /** Background work (search indexing) started by create(); awaited by settle() before shutdown. */
-  const background = new Set<Promise<unknown>>();
 
   async function summarize(
     campaign: CampaignRow,
@@ -108,11 +104,6 @@ export function createScheduler(deps: SchedulerDeps) {
   }
 
   return {
-    /** Waits for background indexing to finish (scripts and graceful shutdown). */
-    async settle(): Promise<void> {
-      await Promise.allSettled([...background]);
-    },
-
     async create(
       userId: string,
       input: CreateCampaignBody,
@@ -204,15 +195,6 @@ export function createScheduler(deps: SchedulerDeps) {
           })),
         );
       }
-
-      const indexing = deps.repo
-        .docs(planned.map((p) => p.id))
-        .then((docs) => deps.search.indexDocs(docs))
-        .catch((err) =>
-          deps.log.warn({ err, campaignId: campaign.id }, 'initial search indexing failed'),
-        )
-        .finally(() => background.delete(indexing));
-      background.add(indexing);
 
       const usage = await deps.rateLimiter
         .senderUsage(

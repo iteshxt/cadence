@@ -8,7 +8,6 @@ import type { NotifyQueue } from '../queues/notifyQueue.js';
 import type { EmailsRepo, SendContext } from '../services/emails.repo.js';
 import { classifySendError, type SendFn } from '../services/gmail.service.js';
 import type { RateLimiter } from '../services/ratelimit.service.js';
-import type { Search } from '../services/search.service.js';
 import { senderCap } from '../services/senders.service.js';
 
 /** A reserved slot this close to now counts as "now" (§7.2 step 3). */
@@ -21,7 +20,6 @@ export interface SendProcessorDeps {
   repo: EmailsRepo;
   rateLimiter: RateLimiter;
   send: SendFn;
-  search: Pick<Search, 'indexDocs'>;
   notifyQueue: Pick<NotifyQueue, 'add'>;
   log: Logger;
   config: {
@@ -45,10 +43,6 @@ function messageOf(err: unknown): string {
 
 export function createSendEmailProcessor(deps: SendProcessorDeps) {
   const now = deps.now ?? Date.now;
-
-  async function reindex(emailId: string) {
-    await deps.search.indexDocs(await deps.repo.docs([emailId]));
-  }
 
   async function sleepUntil(
     job: SendJob,
@@ -79,7 +73,6 @@ export function createSendEmailProcessor(deps: SendProcessorDeps) {
     const at = deferTargetMs(hour + 1, pos, cap, spacing);
 
     await deps.repo.markDeferred(email.id, new Date(at), scope, cap);
-    await reindex(email.id);
 
     if (await deps.rateLimiter.claimLimitEvent(scope, scopeId, campaign.userId, hour)) {
       let notified = false;
@@ -134,7 +127,6 @@ export function createSendEmailProcessor(deps: SendProcessorDeps) {
           log.warn(
             'previous attempt was interrupted after its claim; marked failed instead of resending',
           );
-          await reindex(emailId);
         }
         return;
       }
@@ -146,7 +138,6 @@ export function createSendEmailProcessor(deps: SendProcessorDeps) {
     if (!sender.isActive || sender.needsReconnect || sender.userId !== campaign.userId) {
       if (await deps.repo.markFailed(emailId, 'sender disconnected')) {
         log.warn({ senderId: sender.id }, 'sender is disconnected; email marked failed');
-        await reindex(emailId);
       }
       return;
     }
@@ -190,20 +181,17 @@ export function createSendEmailProcessor(deps: SendProcessorDeps) {
         text: campaign.body,
       });
       await deps.repo.markSent(emailId, result.messageId, result.previewUrl);
-      await reindex(emailId);
       log.info({ senderId: sender.id, campaignId: campaign.id }, 'email sent');
     } catch (err) {
       const kind = classifySendError(err);
       const message = messageOf(err);
       if (kind === 'retryable' && !isFinalAttempt(job)) {
         await deps.repo.revertToScheduled(emailId, message);
-        await reindex(emailId);
         log.warn({ err: message }, 'retryable send error; will retry');
         throw err;
       }
       const reason = kind === 'ambiguous' ? `ambiguous: ${message}` : message;
       await deps.repo.markFailed(emailId, reason);
-      await reindex(emailId);
       log.error({ err: message, kind }, 'email failed');
       throw new UnrecoverableError(reason);
     }
@@ -219,9 +207,7 @@ export function createSendEmailProcessor(deps: SendProcessorDeps) {
       // UnrecoverableError), so this only handles database, Redis, or unexpected errors.
       if (isFinalAttempt(job)) {
         try {
-          if (await deps.repo.markFailed(job.data.emailId, `error: ${messageOf(err)}`)) {
-            await reindex(job.data.emailId);
-          }
+          await deps.repo.markFailed(job.data.emailId, `error: ${messageOf(err)}`);
         } catch (markErr) {
           deps.log.error(
             { err: messageOf(markErr), emailId: job.data.emailId },

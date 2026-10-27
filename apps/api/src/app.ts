@@ -52,7 +52,7 @@ export function createApp(ctx: Context, opts: AppOptions = {}): Express {
   );
 
   app.get('/health', async (_req, res) => {
-    const [db, redis, search] = await Promise.all([
+    const [db, redis] = await Promise.all([
       ctx.db.execute(sql`select 1`).then(
         () => true,
         () => false,
@@ -61,10 +61,9 @@ export function createApp(ctx: Context, opts: AppOptions = {}): Express {
         (r) => r === 'PONG',
         () => false,
       ),
-      ctx.search.ping(),
     ]);
-    const status = db && redis ? (search ? 'ok' : 'degraded') : 'down';
-    res.status(status === 'down' ? 503 : 200).json({ status, checks: { db, redis, search } });
+    const status = db && redis ? 'ok' : 'down';
+    res.status(status === 'down' ? 503 : 200).json({ status, checks: { db, redis } });
   });
 
   // Bull Board serves its own inline scripts, so it is mounted before helmet's CSP (QD-1, QD-2).

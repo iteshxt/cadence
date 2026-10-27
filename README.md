@@ -25,7 +25,7 @@ deploy/         Production Docker Compose + Caddy for the free VM
 ## Requirements
 
 - Node.js 22.12+ and pnpm 10 (`corepack enable`)
-- Docker (Redis, Elasticsearch, and optionally Postgres for local work)
+- Docker (Redis, and optionally Postgres for local work)
 - A Supabase project with the Google provider enabled (for sign-in)
 - The same Google Cloud OAuth client with the Gmail API enabled (for Connect Gmail)
 
@@ -33,7 +33,7 @@ deploy/         Production Docker Compose + Caddy for the free VM
 
 ```bash
 pnpm install
-docker compose --profile localdb up -d        # Redis, Elasticsearch, and a local Postgres
+docker compose --profile localdb up -d        # Redis and a local Postgres
 
 cp .env.example apps/api/.env                 # then fill in the "api" section
 cp .env.example apps/web/.env.local           # then fill in the "web" section
@@ -72,7 +72,6 @@ Create a Slack app with the `incoming-webhook` and `chat:write` scopes and the r
 
 ```bash
 pnpm test                                                    # everything
-TEST_ELASTICSEARCH_URL=http://localhost:9200 pnpm test       # also run the Elasticsearch suite
 ```
 
 The API suite starts throwaway Postgres and Redis containers with testcontainers. If your Docker setup can't run the Ryuk reaper, set `TESTCONTAINERS_RYUK_DISABLED=true`. The suite covers:
@@ -81,7 +80,8 @@ The API suite starts throwaway Postgres and Redis containers with testcontainers
 - deferral order and Slack-alert deduplication
 - idempotent campaign creation, including a double-click race
 - the database claim guard
-- Gmail send-error classification, and OAuth with a stubbed Google
+- Gmail send-error classification, and connecting Gmail with a stubbed Google
+- search over recipients, subjects and messages (Postgres), including HTML-safe highlights
 - lease handling for interrupted sends
 - the reconciler
 - user scoping
@@ -114,21 +114,17 @@ SEND_DRY_RUN=true pnpm --filter @cadence/api load-test --user you@example.com --
 
 ## Deploy (free tier)
 
-See tech-spec §13.2 for why the setup looks like this. In short, the worker is a long-lived process and Redis and Elasticsearch need a free home.
+See tech-spec §13.2 for why the setup looks like this. In short, the worker is a long-lived process and Redis needs a free home.
 
 **Web on Vercel:**
 
 1. Import the repo and set **Root Directory** to `apps/web`.
 2. Add the `NEXT_PUBLIC_*` variables, plus `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (not public). `NEXT_PUBLIC_API_URL` is `https://<your DuckDNS name>`.
 
-**API, worker, Redis and Elasticsearch on an Oracle Cloud Always Free VM:**
+**API, worker and Redis on an Oracle Cloud Always Free VM:**
 
 1. Create an Ampere A1 instance (Ubuntu). Open ports 80 and 443 in the VCN security list and the OS firewall.
-2. Install Docker. Raise the Elasticsearch map count:
-   ```bash
-   sudo sysctl -w vm.max_map_count=262144
-   ```
-   Persist it in `/etc/sysctl.d/`.
+2. Install Docker.
 3. Point a free DuckDNS subdomain at the VM's public IP.
 4. Write `deploy/.env` from the `api` and `deploy` sections of `.env.example`, then start the stack:
    ```bash

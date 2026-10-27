@@ -3,7 +3,6 @@ import type { Logger } from '../lib/logger.js';
 import type { Redis } from '../queues/connection.js';
 import { sendJobOptions, type EmailQueue } from '../queues/emailQueue.js';
 import type { EmailsRepo } from './emails.repo.js';
-import type { Search } from './search.service.js';
 
 const LOCK_KEY = 'reconcile:lock';
 const LOCK_TTL_SEC = 60;
@@ -20,7 +19,6 @@ export interface ReconcilerDeps {
   redis: Redis;
   emailQueue: EmailQueue;
   repo: EmailsRepo;
-  search: Pick<Search, 'indexDocs'>;
   log: Logger;
   leaseMs: number;
 }
@@ -42,7 +40,6 @@ export async function reconcile(deps: ReconcilerDeps): Promise<ReconcileSummary>
     // 1. Claims whose lease expired: the send may or may not have happened, so never resend.
     const interrupted = await deps.repo.failExpiredSending(deps.leaseMs);
     summary.interrupted = interrupted.length;
-    if (interrupted.length > 0) await deps.search.indexDocs(await deps.repo.docs(interrupted));
 
     // 2. Pending rows without a live job.
     let afterId: string | null = null;

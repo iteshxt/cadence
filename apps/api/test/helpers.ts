@@ -14,7 +14,6 @@ export function testEnv(overrides: Partial<Record<keyof Env, string>> = {}): Env
     DATABASE_URL: inject('databaseUrl'),
     REDIS_URL: inject('redisUrl'),
     SUPABASE_URL: 'https://example.supabase.co',
-    ELASTICSEARCH_URL: 'http://127.0.0.1:1',
     ENCRYPTION_KEY: randomBytes(32).toString('base64'),
     STATE_SECRET: randomBytes(48).toString('base64url'),
     BULL_BOARD_USER: 'admin',
@@ -23,15 +22,8 @@ export function testEnv(overrides: Partial<Record<keyof Env, string>> = {}): Env
   });
 }
 
-/** A context whose search writes are recorded instead of sent to Elasticsearch. */
 export function testContext(overrides: Partial<Record<keyof Env, string>> = {}) {
-  const ctx = createContext(testEnv(overrides), createLogger('silent', false));
-  const indexed: string[] = [];
-  ctx.search.indexDocs = async (docs) => {
-    indexed.push(...docs.map((d) => `${d.id}@${d.version}:${d.status}`));
-  };
-  ctx.search.ensureIndex = async () => {};
-  return Object.assign(ctx, { indexed });
+  return createContext(testEnv(overrides), createLogger('silent', false));
 }
 
 export async function resetState(ctx: Context) {

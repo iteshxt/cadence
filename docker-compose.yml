@@ -1,7 +1,7 @@
 # Local infrastructure: `docker compose up -d`
 #
-# Redis and Elasticsearch are always needed. Postgres is optional: point DATABASE_URL at your
-# Supabase project, or at this container for offline development and tests.
+# Redis is always needed. Postgres is optional: point DATABASE_URL at your Supabase project, or
+# at this container for offline development and tests. Search runs in Postgres (tech-spec §11).
 name: cadence
 
 services:
@@ -25,20 +25,6 @@ services:
       timeout: 3s
       retries: 10
 
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.2
-    environment:
-      discovery.type: single-node
-      xpack.security.enabled: 'false'
-      ES_JAVA_OPTS: -Xms512m -Xmx512m
-    ports: ['127.0.0.1:9200:9200']
-    volumes: [es-data:/usr/share/elasticsearch/data]
-    healthcheck:
-      test: ['CMD-SHELL', 'curl -fs http://localhost:9200/_cluster/health || exit 1']
-      interval: 10s
-      timeout: 5s
-      retries: 30
-
   postgres:
     image: postgres:17-alpine
     profiles: [localdb]
@@ -56,5 +42,4 @@ services:
 
 volumes:
   redis-data:
-  es-data:
   pg-data:

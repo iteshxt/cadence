@@ -41,7 +41,6 @@ export function emailsRouter(ctx: Context): Router {
     // Best effort: the processor also skips cancelled rows, so a job that can't be removed
     // (for example because it's running right now) is harmless.
     await ctx.emailQueue.remove(id).catch(() => 0);
-    void ctx.repo.docs([id]).then((d) => ctx.search.indexDocs(d));
     res.json(await ctx.repo.getForUser(user.id, id));
   });
 

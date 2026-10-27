@@ -17,7 +17,6 @@ export type ApiErrorCode =
   | 'SLACK_NOT_CONNECTED'
   | 'SLACK_ERROR'
   | 'GMAIL_ERROR'
-  | 'SEARCH_UNAVAILABLE'
   | 'CONFLICT'
   | 'INTERNAL';
 

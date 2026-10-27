@@ -33,7 +33,6 @@ function startWorker(
       repo: ctx.repo,
       rateLimiter: ctx.rateLimiter,
       send: (s, e) => sendImpl(s, e),
-      search: ctx.search,
       notifyQueue: ctx.notifyQueue,
       log: ctx.log,
       config: {
@@ -115,10 +114,6 @@ describe('send pipeline', () => {
     // Planned one second apart (hourly limit 3,600 and a 1 s delay).
     expect(rows[3]!.scheduledAt.getTime() - rows[0]!.scheduledAt.getTime()).toBe(3000);
     expect(rows[0]!.scheduledAt.getTime()).toBeGreaterThanOrEqual(t0 - 1000);
-    // Search saw every status change with increasing versions.
-    expect(ctx.indexed.some((d) => d.startsWith(`${rows[0]!.id}@`) && d.endsWith(':sent'))).toBe(
-      true,
-    );
   });
 
   it('never sends twice even if the same email has two jobs', async () => {
@@ -362,7 +357,6 @@ describe('reconciler', () => {
       redis: ctx.redis,
       emailQueue: ctx.emailQueue,
       repo: ctx.repo,
-      search: ctx.search,
       log: ctx.log,
       leaseMs: 120_000,
     });
@@ -378,7 +372,6 @@ describe('reconciler', () => {
         redis: ctx.redis,
         emailQueue: ctx.emailQueue,
         repo: ctx.repo,
-        search: ctx.search,
         log: ctx.log,
         leaseMs: 120_000,
       }),
@@ -391,7 +384,6 @@ describe('reconciler', () => {
       redis: ctx.redis,
       emailQueue: ctx.emailQueue,
       repo: ctx.repo,
-      search: ctx.search,
       log: ctx.log,
       leaseMs: 120_000,
     });

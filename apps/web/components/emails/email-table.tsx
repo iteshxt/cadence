@@ -49,7 +49,7 @@ function deferTooltip(e: EmailItem) {
   return `${who} reached ${fmtNumber(e.deferLimit ?? 0)} emails this hour. Moved to ${fmtTime(e.nextAttemptAt)}.`;
 }
 
-/** Search highlights come HTML-escaped from Elasticsearch with only <mark> added (encoder: html). */
+/** Search highlights come HTML-escaped from the API with only <mark> added (tech-spec §11). */
 function Highlighted({ html, fallback }: { html: string | undefined; fallback: string }) {
   if (!html) return <>{fallback}</>;
   return <span dangerouslySetInnerHTML={{ __html: html }} />;

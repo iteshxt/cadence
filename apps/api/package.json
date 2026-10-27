@@ -13,14 +13,12 @@
     "start:worker": "node dist/src/worker.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "reindex": "tsx scripts/reindex.ts",
     "load-test": "tsx scripts/load-test.ts"
   },
   "dependencies": {
     "@bull-board/api": "^6.21.3",
     "@bull-board/express": "^6.21.3",
     "@cadence/shared": "workspace:*",
-    "@elastic/elasticsearch": "^8.19.2",
     "bullmq": "^5.81.5",
     "cors": "^2.8.6",
     "drizzle-orm": "^0.45.4",

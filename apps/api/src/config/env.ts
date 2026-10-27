@@ -27,8 +27,6 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   SUPABASE_URL: z.url(),
   REDIS_URL: z.string().min(1),
-  ELASTICSEARCH_URL: z.url(),
-  ELASTICSEARCH_API_KEY: optionalString,
   ENCRYPTION_KEY: z
     .string()
     .refine(

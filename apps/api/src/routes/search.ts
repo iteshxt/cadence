@@ -17,7 +17,7 @@ export function searchRouter(ctx: Context): Router {
       cursor: q.cursor,
       limit: q.limit,
     });
-    // Elasticsearch finds the matches; Postgres stays the source of truth for what is shown.
+    // The search query finds and ranks the matches; the rows shown are hydrated the normal way.
     const items = await ctx.repo.getManyForUser(
       user.id,
       result.hits.map((h) => h.id),

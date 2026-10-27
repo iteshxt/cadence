@@ -10,7 +10,7 @@ import { createNotifyQueue } from './queues/notifyQueue.js';
 import { createEmailsRepo } from './services/emails.repo.js';
 import { createRateLimiter } from './services/ratelimit.service.js';
 import { createScheduler } from './services/scheduler.service.js';
-import { createSearch, createSearchClient } from './services/search.service.js';
+import { createSearch } from './services/search.service.js';
 import { createGmail } from './services/gmail.service.js';
 import { createSendersService } from './services/senders.service.js';
 import { createSettingsService } from './services/settings.service.js';
@@ -24,10 +24,7 @@ export function createContext(env: Env, log: Logger = createLogger(env.LOG_LEVEL
   const emailQueue = createEmailQueue(redis);
   const notifyQueue = createNotifyQueue(redis);
   const crypto = createCrypto(env.ENCRYPTION_KEY);
-  const search = createSearch(
-    createSearchClient(env.ELASTICSEARCH_URL, env.ELASTICSEARCH_API_KEY),
-    log,
-  );
+  const search = createSearch({ db });
   const repo = createEmailsRepo(db);
   const rateLimiter = createRateLimiter(redis);
   const cap = env.MAX_EMAILS_PER_HOUR_PER_SENDER;
@@ -54,7 +51,7 @@ export function createContext(env: Env, log: Logger = createLogger(env.LOG_LEVEL
     search,
     repo,
     rateLimiter,
-    scheduler: createScheduler({ db, env, emailQueue, repo, search, rateLimiter, log }),
+    scheduler: createScheduler({ db, env, emailQueue, repo, rateLimiter, log }),
     slack: createSlack({ db, crypto, env, log }),
     gmail,
     timeline: createTimeline({ db, rateLimiter, maxPerHourPerSender: cap }),
@@ -62,9 +59,8 @@ export function createContext(env: Env, log: Logger = createLogger(env.LOG_LEVEL
     settings: createSettingsService({ db }),
 
     async close() {
-      await ctx.scheduler.settle();
       await Promise.allSettled([emailQueue.close(), notifyQueue.close()]);
-      await Promise.allSettled([redis.quit(), sql.end({ timeout: 5 }), search.client.close()]);
+      await Promise.allSettled([redis.quit(), sql.end({ timeout: 5 })]);
     },
   };
   return ctx;

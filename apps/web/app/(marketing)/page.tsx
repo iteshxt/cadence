@@ -294,8 +294,8 @@ export default function LandingPage() {
               <div className="flex flex-col gap-3">
                 <Logo size="lg" />
                 <p className="max-w-[48ch] text-body text-ink-3">
-                  Built with Next.js, Express, BullMQ, Redis, Postgres, and Elasticsearch. Sends
-                  through the Gmail API from the accounts you connect.
+                  Built with Next.js, Express, BullMQ, Redis, and Postgres. Sends through the Gmail
+                  API from the accounts you connect.
                 </p>
               </div>
               <nav

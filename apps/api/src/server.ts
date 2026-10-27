@@ -13,13 +13,11 @@ const server = app.listen(env.PORT, () => {
   ctx.log.info({ port: env.PORT }, 'api listening');
 });
 
-// Boot-time work: neither blocks serving requests, and neither runs again until the next boot.
-void ctx.search.ensureIndex();
+// Boot-time work: it doesn't block serving requests, and doesn't run again until the next boot.
 void reconcile({
   redis: ctx.redis,
   emailQueue: ctx.emailQueue,
   repo: ctx.repo,
-  search: ctx.search,
   log: ctx.log.child({ component: 'reconciler' }),
   leaseMs: env.SEND_LEASE_MS,
 }).catch((err) => ctx.log.error({ err }, 'reconciler failed'));

@@ -359,12 +359,12 @@ describe('platform', () => {
     expect((await request(app).get('/api/senders').set(auth(bob))).body.items).toEqual([]);
   });
 
-  it('reports health, degraded when search is down', async () => {
+  it('reports health', async () => {
     const res = await request(app).get('/health');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
-      status: 'degraded',
-      checks: { db: true, redis: true, search: false },
+      status: 'ok',
+      checks: { db: true, redis: true },
     });
   });
 

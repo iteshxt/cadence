@@ -2,8 +2,8 @@
 	email {$ACME_EMAIL}
 }
 
-# Automatic HTTPS (Let's Encrypt) for the API's free DuckDNS name. Elasticsearch and Redis are
-# never exposed; only the API is proxied.
+# Automatic HTTPS (Let's Encrypt) for the API's free DuckDNS name. Redis is never exposed; only
+# the API is proxied.
 {$API_DOMAIN} {
 	encode zstd gzip
 	reverse_proxy api:4000
