@@ -45,8 +45,9 @@ export default function PrivacyPage() {
         <Section title="What we collect">
           <p>
             <strong className="text-ink">Your Google profile.</strong> When you sign in with Google
-            we receive your name, email address, and profile photo, and nothing else. We use them to
-            identify your account and show who is signed in.
+            we receive your name, email address, and profile photo, and we ask for permission to
+            send email from that account, which makes it a sender for your campaigns. If you decline
+            that permission, sign-in still works and nothing is sent.
           </p>
           <p>
             <strong className="text-ink">What you upload and schedule.</strong> The recipient
@@ -54,8 +55,8 @@ export default function PrivacyPage() {
             times and results of each send.
           </p>
           <p>
-            <strong className="text-ink">Gmail, if you connect it.</strong> The account&rsquo;s
-            address and name, and permission to send email as that account (Google&rsquo;s{' '}
+            <strong className="text-ink">Gmail sending access.</strong> The account&rsquo;s address
+            and name, and permission to send email as that account (Google&rsquo;s{' '}
             <code className="text-body">gmail.send</code> scope). Cadence can&rsquo;t read, list, or
             delete anything in your mailbox. Google gives us a token for that permission, which we
             store encrypted.

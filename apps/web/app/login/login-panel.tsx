@@ -30,7 +30,12 @@ export function LoginPanel() {
       const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
       const { error: err } = await getSupabase().auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo },
+        options: {
+          redirectTo,
+          // Also ask to send email, so the account becomes a sender at sign-in (PRD SET-1a).
+          scopes: 'https://www.googleapis.com/auth/gmail.send',
+          queryParams: { access_type: 'offline', prompt: 'consent' },
+        },
       });
       if (err) throw err;
     } catch (err) {
@@ -97,8 +102,8 @@ export function LoginPanel() {
                 className="mt-px size-4 shrink-0 text-signal"
               />
               <span>
-                Cadence only sends from Gmail accounts you connect in Settings. You can disconnect
-                them at any time.
+                Signing in also lets Cadence send email from this Gmail account. You can disconnect
+                it at any time in Settings.
               </span>
             </p>
           </div>
@@ -107,7 +112,8 @@ export function LoginPanel() {
             style={rise(150)}
             className="relative mt-6 text-center text-caption text-ink-3 motion-safe:animate-rise"
           >
-            We only use your Google name, email, and photo to sign you in.{' '}
+            We use your Google name, email, and photo to sign you in, and send email only for
+            campaigns you schedule.{' '}
             <Link href="/privacy" className="underline-offset-4 hover:text-ink hover:underline">
               Privacy policy
             </Link>

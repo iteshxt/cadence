@@ -183,6 +183,7 @@ A **campaign** is one compose action. It contains one subject, one body, many re
 | ID | Requirement | Priority |
 |---|---|---|
 | SET-1 | Settings has a **Connect Gmail** button that starts Google OAuth with the `gmail.send` scope (plus `openid email profile` to learn the address). The refresh token is stored encrypted, per user. Connecting the same address again refreshes its access instead of adding a duplicate. | P0 |
+| SET-1a | **Signing in connects Gmail too.** "Continue with Google" also asks for `gmail.send` with offline access, so the Gmail account a user signs in with becomes a sender with no extra step. If they untick the Gmail box, sign-in still succeeds and no sender is added. A sender the user disconnected is never reconnected by a later sign-in; only Connect Gmail brings it back. | P0 |
 | SET-2 | If the user unticks the Gmail permission on Google's consent screen, nothing is saved and Settings explains that Cadence needs it to send. | P0 |
 | SET-3 | Each sender shows its address, a **label** and a **display name** (the name recipients see), its **hourly limit**, and this hour's usage. All three are editable. | P0 |
 | SET-4 | **Disconnect** revokes the token at Google and deactivates the sender. Past emails keep their history. | P0 |
@@ -230,7 +231,7 @@ Full details are in tech-spec §6 and design.md §8.
 ## 9. Acceptance criteria
 
 1. A user signs in with Google and the header shows their name, email, and avatar.
-1a. In Settings they connect a Gmail account, which then appears as a sender with its address and an hourly limit of 20.
+1a. The Gmail account they signed in with already appears in Settings as a sender, with its address and an hourly limit of 20. They can connect more with Connect Gmail.
 2. Uploading a CSV shows the detected count. The user schedules emails a couple of minutes in the future, and they appear in **Scheduled**.
 3. They move to **Sent** on time, the messages arrive in the recipients' inboxes, and the View link opens each one in the sender's Gmail.
 4. **Restart test:** stop the API and worker, wait until past a scheduled time, start them again. The overdue emails send immediately, exactly once, and future emails keep their times.

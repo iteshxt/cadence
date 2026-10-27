@@ -260,3 +260,51 @@ describe('connecting', () => {
     expect((forged as GmailConnectError).reason).toBe('state');
   });
 });
+
+describe('connecting at sign-in', () => {
+  const USERINFO = 'https://openidconnect.googleapis.com/v1/userinfo';
+  const refreshed = (scope: string) =>
+    json(200, { access_token: 'a', expires_in: 3600, scope: `openid email ${scope}` });
+  const me = () => json(200, { email: 'me@gmail.com', email_verified: true, name: 'Me' });
+  const rowsFor = () => ctx.db.select().from(senders).where(eq(senders.fromEmail, 'me@gmail.com'));
+
+  it('adds the signed-in Gmail account as a sender', async () => {
+    const google = fakeGoogle();
+    google.on(TOKEN, refreshed(SEND_SCOPE));
+    google.on(USERINFO, me());
+    expect(await service(google).connectFromSignIn(userId, 'r-sign-in')).toBe('connected');
+    const [row] = await rowsFor();
+    expect(row).toMatchObject({ userId, displayName: 'Me', hourlyLimit: 20, isActive: true });
+    expect(ctx.crypto.decrypt(row!.refreshTokenEnc!)).toBe('r-sign-in');
+  });
+
+  it('stores nothing when the user unticked the Gmail permission', async () => {
+    const google = fakeGoogle();
+    google.on(TOKEN, refreshed('profile'));
+    expect(await service(google).connectFromSignIn(userId, 'r')).toBe('scope');
+    expect(await rowsFor()).toEqual([]);
+  });
+
+  it('never reconnects a sender the user disconnected', async () => {
+    const google = fakeGoogle();
+    google.on(TOKEN, refreshed(SEND_SCOPE));
+    google.on(USERINFO, me());
+    await seedSenders(ctx, userId, 1, {
+      fromEmail: 'me@gmail.com',
+      isActive: false,
+      refreshTokenEnc: null,
+    });
+    expect(await service(google).connectFromSignIn(userId, 'r-new')).toBe('disconnected');
+    const [row] = await rowsFor();
+    expect(row).toMatchObject({ isActive: false, refreshTokenEnc: null });
+  });
+
+  it('refuses a token Google rejects', async () => {
+    const google = fakeGoogle();
+    google.on(TOKEN, json(400, { error: 'invalid_grant' }));
+    const err = await service(google)
+      .connectFromSignIn(userId, 'stolen')
+      .catch((e: unknown) => e);
+    expect((err as GmailConnectError).reason).toBe('exchange');
+  });
+});

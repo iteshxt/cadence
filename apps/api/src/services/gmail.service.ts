@@ -13,6 +13,7 @@ import type { Logger } from '../lib/logger.js';
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
+const USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 const SEND_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
 const SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 const SCOPES = `openid email profile ${SEND_SCOPE}`;
@@ -233,6 +234,51 @@ export function createGmail(deps: GmailDeps) {
     return built.toString('base64url');
   }
 
+  /**
+   * Upserts the sender on (user, address). A reconnect refreshes its access and keeps its label,
+   * display name, and limit. With `reactivate: false` (sign-in), a sender the user disconnected
+   * is left alone and nothing is returned.
+   */
+  async function saveSender(input: {
+    userId: string;
+    email: string;
+    name?: string;
+    refreshToken: string;
+    accessToken?: string;
+    expiresIn?: number;
+    reactivate: boolean;
+  }): Promise<string | null> {
+    const refreshTokenEnc = deps.crypto.encrypt(input.refreshToken);
+    const [row] = await deps.db
+      .insert(senders)
+      .values({
+        userId: input.userId,
+        label: input.email,
+        fromEmail: input.email,
+        displayName: input.name ?? null,
+        hourlyLimit: Math.min(
+          LIMITS.SENDER_HOURLY_DEFAULT,
+          deps.env.MAX_EMAILS_PER_HOUR_PER_SENDER,
+        ),
+        refreshTokenEnc,
+      })
+      .onConflictDoUpdate({
+        target: [senders.userId, senders.fromEmail],
+        set: { refreshTokenEnc, isActive: true, needsReconnect: false, updatedAt: new Date() },
+        setWhere: input.reactivate ? undefined : eq(senders.isActive, true),
+      })
+      .returning({ id: senders.id });
+    if (!row) return null;
+    if (input.accessToken) {
+      tokens.set(row.id, {
+        token: input.accessToken,
+        expiresAt: now() + (input.expiresIn ?? 3600) * 1000 - TOKEN_MARGIN_MS,
+      });
+    }
+    deps.log.info({ userId: input.userId, senderId: row.id }, 'gmail connected');
+    return row.id;
+  }
+
   const send: SendFn = async (sender, email) => {
     if (deps.env.SEND_DRY_RUN) return { messageId: `dry-run-${email.emailId}`, previewUrl: null };
 
@@ -359,33 +405,72 @@ export function createGmail(deps: GmailDeps) {
         throw new GmailConnectError('unverified', 'This Google account’s address isn’t verified.');
       }
 
-      const refreshTokenEnc = deps.crypto.encrypt(body.refresh_token);
-      const [row] = await deps.db
-        .insert(senders)
-        .values({
-          userId,
-          label: claims.email,
-          fromEmail: claims.email,
-          displayName: claims.name ?? null,
-          hourlyLimit: Math.min(
-            LIMITS.SENDER_HOURLY_DEFAULT,
-            deps.env.MAX_EMAILS_PER_HOUR_PER_SENDER,
-          ),
-          refreshTokenEnc,
-        })
-        .onConflictDoUpdate({
-          target: [senders.userId, senders.fromEmail],
-          set: { refreshTokenEnc, isActive: true, needsReconnect: false, updatedAt: new Date() },
-        })
-        .returning({ id: senders.id });
-      if (row && body.access_token) {
-        tokens.set(row.id, {
-          token: body.access_token,
-          expiresAt: now() + (body.expires_in ?? 3600) * 1000 - TOKEN_MARGIN_MS,
-        });
-      }
-      deps.log.info({ userId, senderId: row?.id }, 'gmail connected');
+      await saveSender({
+        userId,
+        email: claims.email,
+        name: claims.name,
+        refreshToken: body.refresh_token,
+        accessToken: body.access_token,
+        expiresIn: body.expires_in,
+        reactivate: true,
+      });
       return { userId, fromEmail: claims.email };
+    },
+
+    /**
+     * Turns the refresh token from Google sign-in into a sender (PRD SET-1a, tech-spec §7.3).
+     * Supabase uses the same OAuth client, so the token refreshes with our credentials.
+     */
+    async connectFromSignIn(
+      userId: string,
+      refreshToken: string,
+    ): Promise<'connected' | 'scope' | 'disconnected'> {
+      const { clientId, clientSecret } = requireConfigured();
+      const res = await postForm(
+        TOKEN_URL,
+        {
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: refreshToken,
+          grant_type: 'refresh_token',
+        },
+        TOKEN_TIMEOUT_MS,
+      );
+      const body = (await res.json().catch(() => ({}))) as {
+        access_token?: string;
+        expires_in?: number;
+        scope?: string;
+        error?: string;
+      };
+      if (!res.ok || !body.access_token) {
+        deps.log.warn({ status: res.status, error: body.error }, 'sign-in refresh token rejected');
+        throw new GmailConnectError('exchange', 'Google didn’t accept the sign-in token.');
+      }
+      if (!body.scope?.split(' ').includes(SEND_SCOPE)) return 'scope';
+
+      const info = await http(USERINFO_URL, {
+        headers: { authorization: `Bearer ${body.access_token}` },
+        signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
+      });
+      const claims = (await info.json().catch(() => ({}))) as {
+        email?: string;
+        email_verified?: boolean;
+        name?: string;
+      };
+      if (!info.ok || !claims.email || claims.email_verified !== true) {
+        throw new GmailConnectError('unverified', 'This Google account’s address isn’t verified.');
+      }
+
+      const saved = await saveSender({
+        userId,
+        email: claims.email,
+        name: claims.name,
+        refreshToken,
+        accessToken: body.access_token,
+        expiresIn: body.expires_in,
+        reactivate: false,
+      });
+      return saved ? 'connected' : 'disconnected';
     },
 
     /** Revokes a refresh token at Google. Best effort: the caller clears it either way. */

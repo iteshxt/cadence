@@ -1,14 +1,31 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { Context } from '../context.js';
+import { AppError } from '../lib/errors.js';
 import { currentUser } from '../middleware/auth.js';
+import { parse } from '../middleware/validate.js';
 import { GmailConnectError } from '../services/gmail.service.js';
+
+const SignInBody = z.object({ refreshToken: z.string().min(1).max(2048) });
 
 /** Authenticated Gmail routes, mounted under /api/integrations/gmail. */
 export function gmailRouter(ctx: Context): Router {
   const router = Router();
   router.post('/authorize', async (req, res) => {
     res.json({ url: await ctx.gmail.authorizeUrl(currentUser(req).id) });
+  });
+
+  // The sign-in callback forwards Google's refresh token here (tech-spec §6.1 step 2).
+  router.post('/sign-in', async (req, res) => {
+    const { refreshToken } = parse(SignInBody, req.body);
+    try {
+      res.json({ result: await ctx.gmail.connectFromSignIn(currentUser(req).id, refreshToken) });
+    } catch (err) {
+      if (err instanceof GmailConnectError) {
+        throw new AppError(400, 'GMAIL_ERROR', err.message);
+      }
+      throw err;
+    }
   });
   return router;
 }

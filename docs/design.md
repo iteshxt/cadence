@@ -281,8 +281,8 @@ Left-aligned throughout, no centered stack. The page alternates `--canvas` and `
 Minimal and calm: one task on the page.
 
 - **Top bar** (80 px, no background): the large lockup on the left, linking home, and a ghost **Back to home** button with a left arrow on the right.
-- **Panel:** centered, 440 px wide, 40 px padding (28 px on phones), 10 px radius, hairline border, `--shadow-float`, floating on the same soft teal glow as the landing hero. Inside: "Sign in to Cadence" (30/36, 600), one line of body in `--ink-2` ("Schedule campaigns and watch them send at your pace."), an error banner when the OAuth `error` parameter is present, a full-width 48 px Google button, and a `--sunken` note with a `--signal` shield icon: "Cadence only sends from Gmail accounts you connect in Settings. You can disconnect them at any time."
-- **Below the panel:** one centered caption about data use ("We only use your Google name, email, and photo to sign you in."), followed by a **Privacy policy** link.
+- **Panel:** centered, 440 px wide, 40 px padding (28 px on phones), 10 px radius, hairline border, `--shadow-float`, floating on the same soft teal glow as the landing hero. Inside: "Sign in to Cadence" (30/36, 600), one line of body in `--ink-2` ("Schedule campaigns and watch them send at your pace."), an error banner when the OAuth `error` parameter is present, a full-width 48 px Google button, and a `--sunken` note with a `--signal` shield icon: "Signing in also lets Cadence send email from this Gmail account. You can disconnect it at any time in Settings."
+- **Below the panel:** one centered caption about data use ("We use your Google name, email, and photo to sign you in, and send email only for campaigns you schedule."), followed by a **Privacy policy** link.
 - **Footer:** "Cadence" on the left and a GitHub link on the right, in `label`/`--ink-3`.
 - **Motion:** the panel rises in on load (the landing `rise` animation); the caption follows 150 ms later. Static under reduced motion.
 
@@ -334,6 +334,7 @@ A single column, max width 720 px. Sections are separated by `section` headings 
    - **Right:** the hourly limit ("20 an hour") over a usage meter ("3 of 20 this hour"), then an **Edit** ghost button.
    - **Edit** expands the row in place: Label, Display name, and Hourly limit (number field, "emails per hour", helper "Up to 200, the server maximum"), with Save (secondary) and Cancel (ghost), plus a ghost-danger **Disconnect** on the left. Disconnect asks inline: "Disconnect this sender? Its scheduled emails will fail instead of sending."
    - A sender Google stopped accepting shows a `--deferred` **Reconnect needed** mark under the address and a **Reconnect** secondary button.
+   - The Gmail account the user signed in with is normally already here (PRD SET-1a).
    - Empty: "No Gmail accounts connected. Connect one to send campaigns from it." with the Connect Gmail button.
    - After the OAuth redirect, a toast: "Gmail connected.", "Gmail wasn't connected.", "Cadence needs permission to send email. Connect again and leave the Gmail box ticked.", or "Couldn't connect Gmail. Try again."
 2. **Campaign defaults:** Delay between emails and Hourly limit (the Compose number fields) and a secondary **Save defaults** button, with the caption "Compose starts with these values."

@@ -267,6 +267,7 @@ The base URL is `/api`. Every route except health, the Slack and Gmail callbacks
 | PATCH | `/api/senders/:id` | `{ label?, displayName?, hourlyLimit? }`; `hourlyLimit` is 1 to the server maximum |
 | DELETE | `/api/senders/:id` | Disconnect: revokes the token at Google, clears it, and deactivates the sender |
 | POST | `/api/integrations/gmail/authorize` | Returns `{ url }`: Google's consent screen with a signed state (§7.3) |
+| POST | `/api/integrations/gmail/sign-in` | `{ refreshToken }` from the sign-in callback (§6.1). Returns `{ result: 'connected' \| 'scope' \| 'disconnected' }` |
 | GET | `/api/integrations/gmail/callback` | Google's redirect target (public). Stores the sender, then redirects to `/dashboard/settings?gmail=connected\|cancelled\|scope\|error` |
 | GET | `/api/settings` | `{ defaultDelaySeconds, defaultHourlyLimit }` (product defaults when unset) |
 | PUT | `/api/settings` | Saves both defaults (same bounds as the campaign fields) |
@@ -355,8 +356,8 @@ Feeds the dashboard pace strip (design.md §7.1). The range is capped at 24 hour
 
 ### 6.1 Auth flow
 
-1. On `/login`, the "Continue with Google" button calls `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: <origin>/auth/callback?next=/dashboard }})`.
-2. Google sends the user to Supabase, which sends them to `/auth/callback`. That route calls `exchangeCodeForSession` and redirects to `next`.
+1. On `/login`, the "Continue with Google" button calls `supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: <origin>/auth/callback?next=/dashboard, scopes: 'https://www.googleapis.com/auth/gmail.send', queryParams: { access_type: 'offline', prompt: 'consent' } }})`. Supabase adds `openid email profile`; the extra scope and offline access make Google return a refresh token for sending (PRD SET-1a).
+2. Google sends the user to Supabase, which sends them to `/auth/callback`. That route calls `exchangeCodeForSession`. The returned session carries `provider_refresh_token` **only in this response** (Supabase doesn't store it), so when it is present the route posts it, server to server with the new access token, to `POST /api/integrations/gmail/sign-in` (§7.3). That call is best effort with a 5 s timeout: if the API is down or the user unticked Gmail, sign-in still completes and they can use Connect Gmail later. Then it redirects to `next`.
 3. `proxy.ts` (Next.js 16's name for `middleware.ts`) refreshes the session cookie on every request. Visiting `/dashboard/*` without a session redirects to `/login?next=…`. Visiting `/login` with a session redirects to `/dashboard`.
 4. `lib/api.ts` reads the access token from the Supabase client and sends it as a Bearer token to the Express API.
 5. The header reads `user.user_metadata.full_name`, `avatar_url`, and `email`.
@@ -488,6 +489,13 @@ Processor steps for `{ emailId }`:
 2. Google redirects to `GMAIL_REDIRECT_URI` (`/api/integrations/gmail/callback`). The API verifies the state, exchanges the code at `https://oauth2.googleapis.com/token`, and checks that the granted `scope` includes `gmail.send`; Google's consent screen lets users untick it, in which case nothing is stored and Settings shows `?gmail=scope`.
 3. The address and name come from the `id_token` in the token response. It arrives directly from Google over TLS, so its payload is read without a signature check (Google's documented exception). An address that isn't `email_verified` is refused.
 4. The sender is upserted on `(user_id, from_email)`: a reconnect replaces the refresh token and clears `needs_reconnect` and `is_active=false`, keeping the label, display name, and limit. A new sender gets label = address, display name = the Google name, and `hourly_limit = min(20, MAX_EMAILS_PER_HOUR_PER_SENDER)`.
+
+**Connecting at sign-in** (`connectFromSignIn`, PRD SET-1a): Supabase's Google provider uses the same OAuth client, so the refresh token from sign-in works with `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+
+1. Refresh it once at the token endpoint. A failure means it isn't ours or isn't valid: nothing is stored.
+2. If the granted `scope` lacks `gmail.send` (the user unticked it), return `scope` and store nothing.
+3. Read the address and name from `https://openidconnect.googleapis.com/v1/userinfo` with the new access token, and refuse an unverified address.
+4. Upsert the sender like the callback does, except that a conflicting row the user **disconnected** (`is_active = false`) is left alone (`ON CONFLICT … DO UPDATE … WHERE is_active`), and the result is `disconnected`.
 
 **Sending:**
 
